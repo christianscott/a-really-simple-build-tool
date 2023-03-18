@@ -29,10 +29,17 @@ class SandboxedActionExecutor {
 
 		// execute the genrule
 		console.error("Executing genrule for " + action.name);
-		proc.spawnSync("bash", ["-c", "set -euo pipefail; " + action.cmd], {
-			stdio: "inherit",
-			cwd: sandboxDir,
-		});
+		const res = proc.spawnSync(
+			"bash",
+			["-c", "set -euo pipefail; " + action.cmd],
+			{
+				stdio: "inherit",
+				cwd: sandboxDir,
+			},
+		);
+		if ((res.status ?? 0) > 0) {
+			throw new Error(`'${action.cmd}' failed with code ${res.status}`);
+		}
 
 		// ensure outputs were created & symlink to the execroot
 		for (const out of action.outs) {
