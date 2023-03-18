@@ -18,7 +18,6 @@ class SandboxedActionExecutor {
 	execute(action) {
 		const sandboxDir = this.nextSandboxDir();
 
-		fs.rmSync(sandboxDir, { recursive: true, force: true });
 		fs.mkdirSync(sandboxDir, { recursive: true });
 
 		// symlink inputs from the execroot into the sandbox dir
@@ -49,6 +48,8 @@ class SandboxedActionExecutor {
 			assert(fs.existsSync(absOutput), "missing output");
 			fs.renameSync(absOutput, path.join(this.dirs.execroot, out));
 		}
+
+		fs.rmSync(sandboxDir, { recursive: true, force: true });
 	}
 
 	nextSandboxDir() {
