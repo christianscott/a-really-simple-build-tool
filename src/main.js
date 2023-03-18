@@ -26,7 +26,7 @@ function parseCliArgs(argsWithBin = process.argv) {
 	const [modeS, ...rest] = argsNoBin;
 	switch (modeS) {
 		case "build":
-			return { mode: mode.build, targets: rest };
+			return { mode: mode.build, targetsToBuild: rest };
 		case "info":
 			return { mode: mode.info };
 		default:
@@ -44,6 +44,10 @@ function main() {
 		return;
 	}
 	assert(args.mode === mode.build);
+	assert(
+		args.targetsToBuild != null && args.targetsToBuild.length > 0,
+		"missing targets to build",
+	);
 
 	const package = "";
 	/** @type {any} */
@@ -69,6 +73,20 @@ function main() {
 		}
 	}
 
+	const resolvedTargetsToBuild = [];
+	for (const targetToBuild of args.targetsToBuild) {
+		if (targets.has(targetToBuild)) {
+			resolvedTargetsToBuild.push(targetToBuild);
+			continue;
+		}
+		const absTargetToBuild = `//${targetToBuild}`;
+		if (targets.has(absTargetToBuild)) {
+			resolvedTargetsToBuild.push(absTargetToBuild);
+			continue;
+		}
+		throw new Error(`could not resolve target ${targetToBuild}`);
+	}
+
 	// build up the graph
 	/** @type {Map<string, Action>} */
 	const actions = new Map();
@@ -83,8 +101,10 @@ function main() {
 	}
 	assert(!graph.isCyclic(), "build graph must not be cyclic");
 
+	const transitiveDeps = graph.walk(...resolvedTargetsToBuild);
+	const ordering = graph.subGraph(transitiveDeps).topoSort();
+
 	const executor = new SandboxedActionExecutor(dirs);
-	const ordering = graph.topoSort();
 	for (const label of ordering) {
 		const action = must(actions.get(label));
 		const deps = graph.edges.get(label);

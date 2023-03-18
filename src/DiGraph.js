@@ -1,3 +1,5 @@
+//@ts-check
+
 const { strict: assert } = require("assert");
 const { must } = require("./must");
 
@@ -72,6 +74,42 @@ class DiGraph {
 			`Graph has a cycle! No topological ordering exists.`,
 		);
 		return topologicalOrdering.reverse();
+	}
+	/**
+	 * @param  {...string} entrypoints
+	 * @returns {Set<string>}
+	 */
+	walk(...entrypoints) {
+		const seen = new Set();
+		// const toVisit = entrypoints;
+		while (entrypoints.length > 0) {
+			const next = entrypoints.shift();
+			seen.add(next);
+			for (const dep of this.edges.get(next)) {
+				if (!seen.has(dep)) {
+					entrypoints.push(dep);
+				}
+			}
+		}
+		return seen;
+	}
+	/**
+	 * @param {Set<string>} keep
+	 * @returns {DiGraph}
+	 */
+	subGraph(keep) {
+		const subGraph = new DiGraph();
+		for (const [node, deps] of this.edges) {
+			if (keep.has(node)) {
+				for (const dep of deps) {
+					keep.has(dep) && subGraph.insert(node, dep);
+				}
+			}
+		}
+		for (const k of keep) {
+			subGraph.edges.get(k);
+		}
+		return subGraph;
 	}
 }
 exports.DiGraph = DiGraph;
