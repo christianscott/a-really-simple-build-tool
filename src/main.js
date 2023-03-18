@@ -9,8 +9,41 @@ const { must } = require("./must");
 const { Action } = require("./Action");
 const { SandboxedActionExecutor } = require("./SandboxedActionExecutor");
 
+const mode = {
+	build: 0,
+	info: 1,
+};
+
+function parseCliArgs(argsWithBin = process.argv) {
+	const filenameArgIdx = argsWithBin.findIndex((arg) => arg === __filename);
+	if (filenameArgIdx < 0) {
+		throw new Error("could not parse args");
+	}
+	const argsNoBin = argsWithBin.slice(filenameArgIdx + 1);
+	if (argsNoBin.length === 0) {
+		throw new Error("not enough arguments. usage: $bazel [build|info] ...");
+	}
+	const [modeS, ...rest] = argsNoBin;
+	switch (modeS) {
+		case "build":
+			return { mode: mode.build, targets: rest };
+		case "info":
+			return { mode: mode.info };
+		default:
+			throw new Error(`unrecognized mode '${modeS}'`);
+	}
+}
+
 function main() {
 	const dirs = getDirs();
+	const args = parseCliArgs(process.argv);
+
+	if (args.mode === mode.info) {
+		console.log(`execroot: ${dirs.execroot}`);
+		console.log(`workspace: ${process.cwd()}`);
+		return;
+	}
+	assert(args.mode === mode.build);
 
 	const package = "";
 	/** @type {any} */
