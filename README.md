@@ -19,7 +19,7 @@ A simple build tool that implements a subset of the features that Bazel supports
 
 I probably won't be adding these because their implementations are not super interesting to me.
 
-1. Persistent action cache (i.e. Bazel without a remote cache or --disk_cache)
+1. [Persistent action cache](https://sluongng.hashnode.dev/bazel-caching-explained-pt-4-persistent-action-cache) (i.e. Bazel without a remote cache or --disk_cache)
 1. Config DSL like starlark
 1. Support for custom rules, or any rule other than genrules
 1. Cross-platform builds
