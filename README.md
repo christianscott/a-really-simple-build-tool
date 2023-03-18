@@ -4,9 +4,26 @@ A simple build tool that implements a subset of the features that Bazel supports
 
 ## Features
 
-1. Sandboxing
+1. [Sandboxing](https://github.com/christianscott/a-really-simple-build-tool/blob/master/src/SandboxedActionExecutor.js#L18-L53)
 1. Genrules
-1. Building a subset of the graph (i.e. specifying a single entrypoint and only building its dependencies)
+1. [Building a subset of the graph](https://github.com/christianscott/a-really-simple-build-tool/blob/master/src/main.js#L106-L107) (i.e. specifying a single entrypoint and only building its dependencies)
+
+## Features I'd like to add
+
+1. Remote cache, with a disk cache as a special case
+1. Remote execution
+1. Parallel builds
+1. Executable outputs + runfiles
+
+## Features I probably won't add
+
+I probably won't be adding these because their implementations are not super interesting to me.
+
+1. Persistent action cache (i.e. Bazel without a remote cache or --disk_cache)
+1. Config DSL like starlark
+1. Support for custom rules, or any rule other than genrules
+1. Cross-platform builds
+1. Test runner
 
 ## Usage
 
