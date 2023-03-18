@@ -74,14 +74,16 @@ function main() {
 	}
 
 	const resolvedTargetsToBuild = [];
-	for (const targetToBuild of args.targetsToBuild) {
+	for (let targetToBuild of args.targetsToBuild) {
+		if (!targetToBuild.startsWith("//")) {
+			targetToBuild = `//${targetToBuild}`;
+		}
 		if (targets.has(targetToBuild)) {
 			resolvedTargetsToBuild.push(targetToBuild);
 			continue;
 		}
-		const absTargetToBuild = `//${targetToBuild}`;
-		if (targets.has(absTargetToBuild)) {
-			resolvedTargetsToBuild.push(absTargetToBuild);
+		if (files.has(targetToBuild)) {
+			resolvedTargetsToBuild.push(must(files.get(targetToBuild)));
 			continue;
 		}
 		throw new Error(`could not resolve target ${targetToBuild}`);
