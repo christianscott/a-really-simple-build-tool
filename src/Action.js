@@ -25,10 +25,11 @@ class Action {
 			"sandbox",
 			(Action.nextId++).toString(10),
 		);
+		/** @type {string[]} */
 		this.inputs = [];
 	}
 	/**
-	 * @typedef {{ filename: string, realPath: string }} Output
+	 * @typedef {string} Output
 	 * @param {readonly Output[]} inputs
 	 */
 	addInputs(inputs) {
@@ -50,34 +51,30 @@ class Action {
 		fs.rmSync(this.sandboxDir, { recursive: true, force: true });
 		fs.mkdirSync(this.sandboxDir, { recursive: true });
 
+		// symlink inputs from the execroot into the sandbox dir
 		for (const input of this.inputs) {
 			fs.symlinkSync(
-				input.realPath,
-				path.join(this.sandboxDir, input.filename),
+				path.join(Action.dirs.execroot, input),
+				path.join(this.sandboxDir, input),
 			);
 		}
 
+		// execute the genrule
 		console.error("Executing genrule for " + this.name);
 		proc.spawnSync("bash", ["-c", "set -euo pipefail; " + this.cmd], {
 			stdio: "inherit",
 			cwd: this.sandboxDir,
 		});
+
+		// ensure outputs were created & symlink to the execroot
 		for (const out of this.outs) {
-			assert(fs.existsSync(path.join(this.sandboxDir, out)), "missing output");
+			const absOutput = path.join(this.sandboxDir, out);
+			assert(fs.existsSync(absOutput), "missing output");
+			fs.renameSync(absOutput, path.join(Action.dirs.execroot, out));
 		}
 	}
-	/**
-	 * @returns {readonly Output[]}
-	 */
 	outputs() {
-		const outputs = [];
-		for (const output of this.outs) {
-			outputs.push({
-				filename: output,
-				realPath: path.join(this.sandboxDir, output),
-			});
-		}
-		return outputs;
+		return this.outs;
 	}
 }
 exports.Action = Action;
