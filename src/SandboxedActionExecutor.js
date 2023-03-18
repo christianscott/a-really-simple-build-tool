@@ -3,12 +3,14 @@ const { strict: assert } = require("assert");
 const fs = require("fs");
 const proc = require("child_process");
 const path = require("path");
-const { getDirs } = require("./getDirs");
 const { Action } = require("./Action");
 
 class SandboxedActionExecutor {
-	static dirs = getDirs();
 	static nextId = 0;
+
+	constructor(dirs) {
+		this.dirs = dirs;
+	}
 
 	/**
 	 * @param {Action} action
@@ -22,7 +24,7 @@ class SandboxedActionExecutor {
 		// symlink inputs from the execroot into the sandbox dir
 		for (const input of action.inputs) {
 			fs.symlinkSync(
-				path.join(SandboxedActionExecutor.dirs.execroot, input),
+				path.join(this.dirs.execroot, input),
 				path.join(sandboxDir, input),
 			);
 		}
@@ -45,16 +47,13 @@ class SandboxedActionExecutor {
 		for (const out of action.outs) {
 			const absOutput = path.join(sandboxDir, out);
 			assert(fs.existsSync(absOutput), "missing output");
-			fs.renameSync(
-				absOutput,
-				path.join(SandboxedActionExecutor.dirs.execroot, out),
-			);
+			fs.renameSync(absOutput, path.join(this.dirs.execroot, out));
 		}
 	}
 
 	nextSandboxDir() {
 		return path.join(
-			SandboxedActionExecutor.dirs.execroot,
+			this.dirs.execroot,
 			"sandbox",
 			(SandboxedActionExecutor.nextId++).toString(10),
 		);

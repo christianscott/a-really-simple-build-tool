@@ -1,6 +1,8 @@
 // @ts-check
 const { strict: assert } = require("assert");
+const crypto = require("crypto");
 const fs = require("fs");
+const path = require("path");
 const yaml = require("js-yaml");
 const { DiGraph } = require("./DiGraph");
 const { must } = require("./must");
@@ -8,6 +10,8 @@ const { Action } = require("./Action");
 const { SandboxedActionExecutor } = require("./SandboxedActionExecutor");
 
 function main() {
+	const dirs = getDirs();
+
 	const package = "";
 	/** @type {any} */
 	const config_ = yaml.load(
@@ -46,7 +50,7 @@ function main() {
 	}
 	assert(!graph.isCyclic(), "build graph must not be cyclic");
 
-	const executor = new SandboxedActionExecutor();
+	const executor = new SandboxedActionExecutor(dirs);
 	const ordering = graph.topoSort();
 	for (const label of ordering) {
 		const action = must(actions.get(label));
@@ -74,6 +78,28 @@ function main() {
 		assert(target != null);
 		return target;
 	}
+}
+
+function getDirs() {
+	const workspace = process.cwd();
+	const outputRoot = path.join("/", "private", "var", "tmp");
+	const outputUserRoot = path.join(
+		outputRoot,
+		`_bazel_${must(process.env.USER)}`,
+	);
+	const workspaceDirHash = crypto
+		.createHash("md5")
+		.update(workspace)
+		.digest("hex");
+	const outputBase = path.join(outputUserRoot, workspaceDirHash);
+	const execroot = path.join(outputBase, "execroot");
+	return {
+		workspace,
+		outputRoot,
+		outputUserRoot,
+		outputBase,
+		execroot,
+	};
 }
 
 /**

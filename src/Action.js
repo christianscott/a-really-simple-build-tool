@@ -23,7 +23,7 @@ class Action {
 	addInputs(inputs) {
 		this.inputs.push(...inputs);
 	}
-	hash() {
+	key() {
 		const hasher = crypto.createHash("sha256");
 		hasher.update(this.name);
 		for (const src of this.srcs) {
