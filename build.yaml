@@ -1,0 +1,20 @@
+one:
+  rule: genrule
+  cmd: echo I am one! > one.txt
+  outs:
+    - one.txt
+
+two:
+  rule: genrule
+  cmd: echo I am two > two.txt
+  outs:
+    - two.txt
+
+combined:
+  rule: genrule
+  cmd: cat one.txt two.txt > combined.txt
+  srcs:
+    - :one.txt
+    - :two
+  outs:
+    - combined.txt
