@@ -5,6 +5,7 @@ const yaml = require("js-yaml");
 const { DiGraph } = require("./DiGraph");
 const { must } = require("./must");
 const { Action } = require("./Action");
+const { SandboxedActionExecutor } = require("./SandboxedActionExecutor");
 
 function main() {
 	const package = "";
@@ -45,6 +46,7 @@ function main() {
 	}
 	assert(!graph.isCyclic(), "build graph must not be cyclic");
 
+	const executor = new SandboxedActionExecutor();
 	const ordering = graph.topoSort();
 	for (const label of ordering) {
 		const action = must(actions.get(label));
@@ -53,7 +55,7 @@ function main() {
 			const depAction = must(actions.get(dep));
 			action.addInputs(depAction.outputs());
 		}
-		action.execute();
+		executor.execute(action);
 	}
 
 	/**
