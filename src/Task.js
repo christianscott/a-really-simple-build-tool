@@ -2,11 +2,12 @@
 
 class Task {
 	/**
-	 * @param {{ run: () => Promise<void>, deps: Task[] }} opts
+	 * @param {{ run: () => Promise<void>, deps: Task[], limiter: import('./ConcurrencyLimiter').ConcurrencyLimiter }} opts
 	 */
-	constructor({ run, deps }) {
+	constructor({ run, deps, limiter }) {
 		this._run = run;
 		this.deps = deps;
+		this.limiter = limiter;
 		this.resolve = () => {};
 		/** @type {Promise<void>} */
 		this.finished = new Promise((resolve) => {
@@ -17,7 +18,7 @@ class Task {
 		for (const task of this.deps) {
 			await task.finished;
 		}
-		await this._run();
+		await this.limiter.run(this._run);
 		this.resolve();
 	}
 }

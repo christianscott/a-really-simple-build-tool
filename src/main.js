@@ -133,8 +133,9 @@ async function main() {
 		}
 		const depTasks = [...deps].map((dep) => must(tasks.get(dep)));
 		const task = new Task({
-			run: () => limiter.run(() => executor.execute(action)),
+			run: () => executor.execute(action),
 			deps: depTasks,
+			limiter: limiter,
 		});
 		tasks.set(label, task);
 	}
