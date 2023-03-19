@@ -1,11 +1,11 @@
 // @ts-check
-const { strict: assert } = require("assert");
-const fs = require("fs");
-const path = require("path");
-const { Action } = require("./Action");
-const { exec } = require("./exec");
+import { strict as assert } from "assert";
+import { promises, existsSync } from "fs";
+import { join } from "path";
+import { Action } from "./Action.js";
+import { exec } from "./exec.js";
 
-class SandboxedActionExecutor {
+export class SandboxedActionExecutor {
 	static nextId = 0;
 
 	constructor(dirs) {
@@ -18,13 +18,13 @@ class SandboxedActionExecutor {
 	async execute(action) {
 		const sandboxDir = this.nextSandboxDir();
 
-		await fs.promises.mkdir(sandboxDir, { recursive: true });
+		await promises.mkdir(sandboxDir, { recursive: true });
 
 		// symlink inputs from the execroot into the sandbox dir
 		for (const input of action.inputs) {
-			await fs.promises.symlink(
-				path.join(this.dirs.execroot, input),
-				path.join(sandboxDir, input),
+			await promises.symlink(
+				join(this.dirs.execroot, input),
+				join(sandboxDir, input),
 			);
 		}
 
@@ -41,20 +41,19 @@ class SandboxedActionExecutor {
 
 		// ensure outputs were created & symlink to the execroot
 		for (const out of action.outs) {
-			const absOutput = path.join(sandboxDir, out);
-			assert(fs.existsSync(absOutput), "missing output");
-			await fs.promises.rename(absOutput, path.join(this.dirs.execroot, out));
+			const absOutput = join(sandboxDir, out);
+			assert(existsSync(absOutput), "missing output");
+			await promises.rename(absOutput, join(this.dirs.execroot, out));
 		}
 
-		await fs.promises.rm(sandboxDir, { recursive: true, force: true });
+		await promises.rm(sandboxDir, { recursive: true, force: true });
 	}
 
 	nextSandboxDir() {
-		return path.join(
+		return join(
 			this.dirs.execroot,
 			"sandbox",
 			(SandboxedActionExecutor.nextId++).toString(10),
 		);
 	}
 }
-exports.SandboxedActionExecutor = SandboxedActionExecutor;

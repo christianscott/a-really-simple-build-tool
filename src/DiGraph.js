@@ -1,9 +1,9 @@
 //@ts-check
 
-const { strict: assert } = require("assert");
-const { must } = require("./must");
+import { strict as assert } from "assert";
+import { must } from "./must.js";
 
-class DiGraph {
+export class DiGraph {
 	edges = new DefaultMap(() => new Set());
 	insert(frm, to) {
 		this.edges.get(frm).add(to);
@@ -112,7 +112,6 @@ class DiGraph {
 		return subGraph;
 	}
 }
-exports.DiGraph = DiGraph;
 
 /**
  * @template K

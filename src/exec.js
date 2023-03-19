@@ -1,10 +1,10 @@
 // @ts-check
 
-const childProc = require("child_process");
+import { spawn } from "child_process";
 
 /** @returns {Promise<void>} */
-function exec({ cmd, args, opts }) {
-	const proc = childProc.spawn(cmd, args, opts);
+export function exec({ cmd, args, opts }) {
+	const proc = spawn(cmd, args, opts);
 	return new Promise((resolve, reject) => {
 		proc.on("close", (code) => {
 			code === 0 ? resolve() : reject();
@@ -12,4 +12,3 @@ function exec({ cmd, args, opts }) {
 		proc.on("error", (err) => reject(err));
 	});
 }
-exports.exec = exec;

@@ -1,4 +1,4 @@
-class ConcurrencyLimiter {
+export class ConcurrencyLimiter {
 	queue = [];
 	count = 0;
 
@@ -28,4 +28,3 @@ class ConcurrencyLimiter {
 		}
 	}
 }
-exports.ConcurrencyLimiter = ConcurrencyLimiter;

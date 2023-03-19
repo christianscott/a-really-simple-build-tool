@@ -1,7 +1,7 @@
 //@ts-check
-const crypto = require("crypto");
+import { createHash } from "crypto";
 
-class Action {
+export class Action {
 	/**
 	 * @param {string} name
 	 * @param {string[]} srcs
@@ -24,7 +24,7 @@ class Action {
 		this.inputs.push(...inputs);
 	}
 	key() {
-		const hasher = crypto.createHash("sha256");
+		const hasher = createHash("sha256");
 		hasher.update(this.name);
 		for (const src of this.srcs) {
 			hasher.update(src);
@@ -39,7 +39,6 @@ class Action {
 		return this.outs;
 	}
 }
-exports.Action = Action;
 
 /**
  * @template T

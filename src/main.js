@@ -1,15 +1,16 @@
 // @ts-check
-const { strict: assert } = require("assert");
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
-const yaml = require("js-yaml");
-const { DiGraph } = require("./DiGraph");
-const { must } = require("./must");
-const { Action } = require("./Action");
-const { SandboxedActionExecutor } = require("./SandboxedActionExecutor");
-const { Task } = require("./Task");
-const { ConcurrencyLimiter } = require("./ConcurrencyLimiter");
+import * as url from "url";
+import { strict as assert } from "assert";
+import { createHash } from "crypto";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { load } from "js-yaml";
+import { DiGraph } from "./DiGraph.js";
+import { must } from "./must.js";
+import { Action } from "./Action.js";
+import { SandboxedActionExecutor } from "./SandboxedActionExecutor.js";
+import { Task } from "./Task.js";
+import { ConcurrencyLimiter } from "./ConcurrencyLimiter.js";
 
 const mode = {
 	build: 0,
@@ -17,7 +18,9 @@ const mode = {
 };
 
 function parseCliArgs(argsWithBin = process.argv) {
-	const filenameArgIdx = argsWithBin.findIndex((arg) => arg === __filename);
+	const filenameArgIdx = argsWithBin.findIndex(
+		(arg) => arg === url.fileURLToPath(import.meta.url),
+	);
 	if (filenameArgIdx < 0) {
 		throw new Error("could not parse args");
 	}
@@ -63,11 +66,9 @@ async function main() {
 		"missing targets to build",
 	);
 
-	const package = "";
+	const pkg = "";
 	/** @type {any} */
-	const config_ = yaml.load(
-		fs.readFileSync("./build.yaml", { encoding: "utf-8" }),
-	);
+	const config_ = load(readFileSync("./build.yaml", { encoding: "utf-8" }));
 	/** @type {{ [key: string]: { rule: string, cmd: string, srcs?: string[], outs?: string[] } }} */
 	const config = config_;
 
@@ -75,7 +76,7 @@ async function main() {
 	const targets = new Set();
 	// collect target names
 	for (const name of Object.keys(config)) {
-		targets.add(makeLabel(package, name));
+		targets.add(makeLabel(pkg, name));
 	}
 
 	// assosciate files with targets
@@ -83,7 +84,7 @@ async function main() {
 	const files = new Map();
 	for (const [name, { outs = [] }] of Object.entries(config)) {
 		for (const out of outs) {
-			files.set(makeLabel(package, out), makeLabel(package, name));
+			files.set(makeLabel(pkg, out), makeLabel(pkg, name));
 		}
 	}
 
@@ -108,7 +109,7 @@ async function main() {
 	const actions = new Map();
 	const graph = new DiGraph();
 	for (const [name, conf] of Object.entries(config)) {
-		const label = makeLabel(package, name);
+		const label = makeLabel(pkg, name);
 		const { srcs = [] } = conf;
 		for (const src of srcs) {
 			graph.insert(label, getTargetForLabel(src));
@@ -149,7 +150,7 @@ async function main() {
 		if (!label.startsWith(":")) {
 			throw new Error("unimplemented");
 		}
-		const fullLabel = "//" + package + label;
+		const fullLabel = "//" + pkg + label;
 		if (targets.has(fullLabel)) {
 			return fullLabel;
 		}
@@ -161,17 +162,11 @@ async function main() {
 
 function getDirs() {
 	const workspace = process.cwd();
-	const outputRoot = path.join("/", "private", "var", "tmp");
-	const outputUserRoot = path.join(
-		outputRoot,
-		`_bazel_${must(process.env.USER)}`,
-	);
-	const workspaceDirHash = crypto
-		.createHash("md5")
-		.update(workspace)
-		.digest("hex");
-	const outputBase = path.join(outputUserRoot, workspaceDirHash);
-	const execroot = path.join(outputBase, "execroot");
+	const outputRoot = join("/", "private", "var", "tmp");
+	const outputUserRoot = join(outputRoot, `_bazel_${must(process.env.USER)}`);
+	const workspaceDirHash = createHash("md5").update(workspace).digest("hex");
+	const outputBase = join(outputUserRoot, workspaceDirHash);
+	const execroot = join(outputBase, "execroot");
 	return {
 		workspace,
 		outputRoot,
@@ -182,27 +177,12 @@ function getDirs() {
 }
 
 /**
- * @param {string} package
+ * @param {string} pkg
  * @param {string} name
  * @returns {string}
  */
-function makeLabel(package, name) {
-	return `//${package}:${name}`;
-}
-
-/**
- * @param {string} label
- * @param {string} package
- * @returns {{name: string, package: string}}
- */
-function parseLabel(label, package) {
-	if (label.startsWith("//")) {
-		const [package, name] = label.slice(2).split(":");
-		return { package, name };
-	} else {
-		assert(label.startsWith(":"), "relative labels must start with :");
-		return { package, name: label.slice(1) };
-	}
+function makeLabel(pkg, name) {
+	return `//${pkg}:${name}`;
 }
 
 main().catch((err) => {

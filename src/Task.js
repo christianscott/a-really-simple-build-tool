@@ -1,6 +1,6 @@
 // @ts-check
 
-class Task {
+export class Task {
 	/**
 	 * @param {{ run: () => Promise<void>, deps: Task[], limiter: import('./ConcurrencyLimiter').ConcurrencyLimiter }} opts
 	 */
@@ -22,4 +22,3 @@ class Task {
 		this.resolve();
 	}
 }
-exports.Task = Task;
