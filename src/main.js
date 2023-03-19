@@ -34,7 +34,7 @@ function parseCliArgs(argsWithBin = process.argv) {
 	}
 }
 
-function main() {
+async function main() {
 	const dirs = getDirs();
 	const args = parseCliArgs(process.argv);
 
@@ -114,7 +114,7 @@ function main() {
 			const depAction = must(actions.get(dep));
 			action.addInputs(depAction.outputs());
 		}
-		executor.execute(action);
+		await executor.execute(action);
 	}
 
 	/**
@@ -181,4 +181,7 @@ function parseLabel(label, package) {
 	}
 }
 
-main();
+main().catch((err) => {
+	console.error(err);
+	process.exitCode = 1;
+});

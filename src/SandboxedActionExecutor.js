@@ -1,9 +1,9 @@
 // @ts-check
 const { strict: assert } = require("assert");
 const fs = require("fs");
-const proc = require("child_process");
 const path = require("path");
 const { Action } = require("./Action");
+const { exec } = require("./exec");
 
 class SandboxedActionExecutor {
 	static nextId = 0;
@@ -15,14 +15,14 @@ class SandboxedActionExecutor {
 	/**
 	 * @param {Action} action
 	 */
-	execute(action) {
+	async execute(action) {
 		const sandboxDir = this.nextSandboxDir();
 
-		fs.mkdirSync(sandboxDir, { recursive: true });
+		await fs.promises.mkdir(sandboxDir, { recursive: true });
 
 		// symlink inputs from the execroot into the sandbox dir
 		for (const input of action.inputs) {
-			fs.symlinkSync(
+			await fs.promises.symlink(
 				path.join(this.dirs.execroot, input),
 				path.join(sandboxDir, input),
 			);
@@ -30,26 +30,23 @@ class SandboxedActionExecutor {
 
 		// execute the genrule
 		console.error("Executing genrule for " + action.name);
-		const res = proc.spawnSync(
-			"bash",
-			["-c", "set -euo pipefail; " + action.cmd],
-			{
+		await exec({
+			cmd: "bash",
+			args: ["-c", "set -euo pipefail; " + action.cmd],
+			opts: {
 				stdio: "inherit",
 				cwd: sandboxDir,
 			},
-		);
-		if ((res.status ?? 0) > 0) {
-			throw new Error(`'${action.cmd}' failed with code ${res.status}`);
-		}
+		});
 
 		// ensure outputs were created & symlink to the execroot
 		for (const out of action.outs) {
 			const absOutput = path.join(sandboxDir, out);
 			assert(fs.existsSync(absOutput), "missing output");
-			fs.renameSync(absOutput, path.join(this.dirs.execroot, out));
+			await fs.promises.rename(absOutput, path.join(this.dirs.execroot, out));
 		}
 
-		fs.rmSync(sandboxDir, { recursive: true, force: true });
+		await fs.promises.rm(sandboxDir, { recursive: true, force: true });
 	}
 
 	nextSandboxDir() {
