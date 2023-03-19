@@ -141,3 +141,11 @@ In english, with assistance from GPT-4:
 1. symlink `myfile1.txt` from the output directory into the sandbox directory for the second genrule
 1. create `myfile2.txt`, presumably in the sandbox directory ($execroot/sandbox/2/bazel-out/aarch64-fastbuild/bin/myfile2.txt)
 1. move `myfile2.txt` from the sandbox to the output directory
+
+## how do other build tools run tasks across multiple worker threads?
+
+`please` runs `queueTargetAsync` in a goroutine for each build target. that function loops over each of its dependencies & waits for them to finish: https://github.com/thought-machine/please/blob/0dc8d00e36c45bcb1c011c7ac824fb0b94e741e3/src/core/state.go#L1133-L1169. This is a cool way to take advantage of the cheapness of goroutines. I don't think this would work unless you had access to something similar (green threads?).
+
+I actually think there might be a way to do something similar with the event loop. `await`ing a promise should be very cheap.
+
+I cannot figure out how bazel does it. The codebase is hard to read at the best of times, but the level of indirection in `AbstractParallelEvaluator` makes it nearly impossible https://sourcegraph.com/github.com/bazelbuild/bazel@952438d4c7c69beec3a1dc643d564c116e0e1542/-/blob/src/main/java/com/google/devtools/build/skyframe/AbstractParallelEvaluator.java?L61

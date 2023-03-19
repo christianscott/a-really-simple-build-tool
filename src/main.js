@@ -8,6 +8,8 @@ const { DiGraph } = require("./DiGraph");
 const { must } = require("./must");
 const { Action } = require("./Action");
 const { SandboxedActionExecutor } = require("./SandboxedActionExecutor");
+const { Task } = require("./Task");
+const { ConcurrencyLimiter } = require("./ConcurrencyLimiter");
 
 const mode = {
 	build: 0,
@@ -25,8 +27,20 @@ function parseCliArgs(argsWithBin = process.argv) {
 	}
 	const [modeS, ...rest] = argsNoBin;
 	switch (modeS) {
-		case "build":
-			return { mode: mode.build, targetsToBuild: rest };
+		case "build": {
+			const targetsToBuild = [];
+			let jobs = 8;
+			for (let i = 0; i < rest.length; i++) {
+				const arg = rest[i];
+				if (arg === "--jobs" || arg === "-j") {
+					const jobsS = must(rest[++i]);
+					jobs = parseInt(jobsS, 10);
+				} else {
+					targetsToBuild.push(arg);
+				}
+			}
+			return { mode: mode.build, targetsToBuild: targetsToBuild, jobs };
+		}
 		case "info":
 			return { mode: mode.info };
 		default:
@@ -106,7 +120,10 @@ async function main() {
 	const transitiveDeps = graph.walk(...resolvedTargetsToBuild);
 	const ordering = graph.subGraph(transitiveDeps).topoSort();
 
+	const limiter = new ConcurrencyLimiter(args.jobs);
 	const executor = new SandboxedActionExecutor(dirs);
+	/** @type {Map<string, Task>} */
+	const tasks = new Map();
 	for (const label of ordering) {
 		const action = must(actions.get(label));
 		const deps = graph.edges.get(label);
@@ -114,8 +131,14 @@ async function main() {
 			const depAction = must(actions.get(dep));
 			action.addInputs(depAction.outputs());
 		}
-		await executor.execute(action);
+		const depTasks = [...deps].map((dep) => must(tasks.get(dep)));
+		const task = new Task({
+			run: () => limiter.run(() => executor.execute(action)),
+			deps: depTasks,
+		});
+		tasks.set(label, task);
 	}
+	await Promise.all([...tasks.values()].map((task) => task.run()));
 
 	/**
 	 * @param {string} label

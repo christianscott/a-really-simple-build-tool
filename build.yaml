@@ -1,18 +1,18 @@
 one:
   rule: genrule
-  cmd: echo I am one! > one.txt
+  cmd: sleep 2; echo I am one! > one.txt
   outs:
     - one.txt
 
 two:
   rule: genrule
-  cmd: echo I am two > two.txt
+  cmd: sleep 2; echo I am two > two.txt
   outs:
     - two.txt
 
 combined:
   rule: genrule
-  cmd: cat one.txt two.txt > combined.txt
+  cmd: sleep 2; cat one.txt two.txt > combined.txt
   srcs:
     - :one.txt
     - :two
