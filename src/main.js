@@ -1,10 +1,10 @@
 // @ts-check
 import * as url from "url";
 import { strict as assert } from "assert";
-import { createHash } from "crypto";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { load } from "js-yaml";
+import * as crypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+import * as jsYAML from "js-yaml";
 import { DiGraph } from "./DiGraph.js";
 import { must } from "./must.js";
 import { Action } from "./Action.js";
@@ -68,7 +68,9 @@ async function main() {
 
 	const pkg = "";
 	/** @type {any} */
-	const config_ = load(readFileSync("./build.yaml", { encoding: "utf-8" }));
+	const config_ = jsYAML.load(
+		fs.readFileSync("./build.yaml", { encoding: "utf-8" }),
+	);
 	/** @type {{ [key: string]: { rule: string, cmd: string, srcs?: string[], outs?: string[] } }} */
 	const config = config_;
 
@@ -155,18 +157,24 @@ async function main() {
 			return fullLabel;
 		}
 		const target = files.get(fullLabel);
-		assert(target != null);
+		assert(target != null, `could not resolve target ${label}`);
 		return target;
 	}
 }
 
 function getDirs() {
 	const workspace = process.cwd();
-	const outputRoot = join("/", "private", "var", "tmp");
-	const outputUserRoot = join(outputRoot, `_bazel_${must(process.env.USER)}`);
-	const workspaceDirHash = createHash("md5").update(workspace).digest("hex");
-	const outputBase = join(outputUserRoot, workspaceDirHash);
-	const execroot = join(outputBase, "execroot");
+	const outputRoot = path.join("/", "private", "var", "tmp");
+	const outputUserRoot = path.join(
+		outputRoot,
+		`_bazel_${must(process.env.USER)}`,
+	);
+	const workspaceDirHash = crypto
+		.createHash("md5")
+		.update(workspace)
+		.digest("hex");
+	const outputBase = path.join(outputUserRoot, workspaceDirHash);
+	const execroot = path.join(outputBase, "execroot");
 	return {
 		workspace,
 		outputRoot,
