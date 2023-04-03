@@ -1,5 +1,6 @@
 {
 	"editor.formatOnSave": true,
 	"editor.insertSpaces": false,
-	"editor.tabSize": 8
+	"editor.tabSize": 8,
+	"typescript.tsdk": "node_modules/typescript/lib"
 }

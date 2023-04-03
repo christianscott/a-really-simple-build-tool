@@ -1,16 +1,14 @@
-// @ts-check
 import * as url from "url";
 import { strict as assert } from "assert";
-import * as crypto from "crypto";
 import * as fs from "fs";
-import * as path from "path";
 import * as jsYAML from "js-yaml";
-import { DiGraph } from "./DiGraph.js";
-import { must } from "./must.js";
-import { Action } from "./Action.js";
-import { SandboxedActionExecutor } from "./SandboxedActionExecutor.js";
-import { Task } from "./Task.js";
-import { ConcurrencyLimiter } from "./ConcurrencyLimiter.js";
+import { DiGraph } from "./DiGraph";
+import { must } from "./must";
+import { Action } from "./Action";
+import { SandboxedActionExecutor } from "./SandboxedActionExecutor";
+import { Task } from "./Task";
+import { ConcurrencyLimiter } from "./ConcurrencyLimiter";
+import { getDirs } from "./dirs";
 
 const mode = {
 	build: 0,
@@ -18,9 +16,7 @@ const mode = {
 };
 
 function parseCliArgs(argsWithBin = process.argv) {
-	const filenameArgIdx = argsWithBin.findIndex(
-		(arg) => arg === url.fileURLToPath(import.meta.url),
-	);
+	const filenameArgIdx = argsWithBin.findIndex((arg) => arg === __filename);
 	if (filenameArgIdx < 0) {
 		throw new Error("could not parse args");
 	}
@@ -67,23 +63,26 @@ async function main() {
 	);
 
 	const pkg = "";
-	/** @type {any} */
 	const config_ = jsYAML.load(
 		fs.readFileSync("./build.yaml", { encoding: "utf-8" }),
 	);
-	/** @type {{ [key: string]: { rule: string, cmd: string, srcs?: string[], outs?: string[] } }} */
-	const config = config_;
+	const config: {
+		[key: string]: {
+			rule: string;
+			cmd: string;
+			srcs?: string[];
+			outs?: string[];
+		};
+	} = config_;
 
-	/** @type {Set<string>} */
-	const targets = new Set();
+	const targets: Set<string> = new Set();
 	// collect target names
 	for (const name of Object.keys(config)) {
 		targets.add(makeLabel(pkg, name));
 	}
 
 	// assosciate files with targets
-	/** @type {Map<string, string>} */
-	const files = new Map();
+	const files: Map<string, string> = new Map();
 	for (const [name, { outs = [] }] of Object.entries(config)) {
 		for (const out of outs) {
 			files.set(makeLabel(pkg, out), makeLabel(pkg, name));
@@ -107,8 +106,7 @@ async function main() {
 	}
 
 	// build up the graph
-	/** @type {Map<string, Action>} */
-	const actions = new Map();
+	const actions: Map<string, Action> = new Map();
 	const graph = new DiGraph();
 	for (const [name, conf] of Object.entries(config)) {
 		const label = makeLabel(pkg, name);
@@ -125,8 +123,7 @@ async function main() {
 
 	const limiter = new ConcurrencyLimiter(args.jobs);
 	const executor = new SandboxedActionExecutor(dirs);
-	/** @type {Map<string, Task>} */
-	const tasks = new Map();
+	const tasks: Map<string, Task> = new Map();
 	for (const label of ordering) {
 		const action = must(actions.get(label));
 		const deps = graph.edges.get(label);
@@ -144,11 +141,7 @@ async function main() {
 	}
 	await Promise.all([...tasks.values()].map((task) => task.run()));
 
-	/**
-	 * @param {string} label
-	 * @returns {string}
-	 */
-	function getTargetForLabel(label) {
+	function getTargetForLabel(label: string): string {
 		if (!label.startsWith(":")) {
 			throw new Error("unimplemented");
 		}
@@ -162,34 +155,12 @@ async function main() {
 	}
 }
 
-function getDirs() {
-	const workspace = process.cwd();
-	const outputRoot = path.join("/", "private", "var", "tmp");
-	const outputUserRoot = path.join(
-		outputRoot,
-		`_bazel_${must(process.env.USER)}`,
-	);
-	const workspaceDirHash = crypto
-		.createHash("md5")
-		.update(workspace)
-		.digest("hex");
-	const outputBase = path.join(outputUserRoot, workspaceDirHash);
-	const execroot = path.join(outputBase, "execroot");
-	return {
-		workspace,
-		outputRoot,
-		outputUserRoot,
-		outputBase,
-		execroot,
-	};
-}
-
 /**
  * @param {string} pkg
  * @param {string} name
  * @returns {string}
  */
-function makeLabel(pkg, name) {
+function makeLabel(pkg: string, name: string): string {
 	return `//${pkg}:${name}`;
 }
 

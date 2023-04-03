@@ -1,21 +1,19 @@
-// @ts-check
 import { strict as assert } from "assert";
 import { promises, existsSync } from "fs";
 import { join } from "path";
-import { Action } from "./Action.js";
-import { exec } from "./exec.js";
+import { Action } from "./Action";
+import { exec } from "./exec";
+import { Dirs } from "./dirs";
 
 export class SandboxedActionExecutor {
 	static nextId = 0;
 
-	constructor(dirs) {
-		this.dirs = dirs;
-	}
+	constructor(private readonly dirs: Dirs) {}
 
 	/**
 	 * @param {Action} action
 	 */
-	async execute(action) {
+	async execute(action: Action) {
 		const sandboxDir = this.nextSandboxDir();
 
 		await promises.mkdir(sandboxDir, { recursive: true });

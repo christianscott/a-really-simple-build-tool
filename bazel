@@ -1,1 +1,1 @@
-node src/main.js $@
+node -r esbuild-register src/main.ts $@

@@ -1,12 +1,10 @@
 export class ConcurrencyLimiter {
-	queue = [];
-	count = 0;
+	private readonly queue: (() => Promise<void>)[] = [];
+	private count = 0;
 
-	constructor(limit) {
-		this.limit = limit;
-	}
+	constructor(private readonly limit: number) {}
 
-	run(task) {
+	run(task: { (): Promise<void>; (): unknown }) {
 		return new Promise((resolve, reject) => {
 			this.queue.push(async () => {
 				this.count++;

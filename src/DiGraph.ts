@@ -1,11 +1,9 @@
-//@ts-check
-
 import { strict as assert } from "assert";
-import { must } from "./must.js";
+import { must } from "./must";
 
 export class DiGraph {
-	edges = new DefaultMap(() => new Set());
-	insert(frm, to) {
+	readonly edges = new DefaultMap<string, Set<string>>(() => new Set());
+	insert(frm: string, to: any) {
 		this.edges.get(frm).add(to);
 	}
 	isCyclic() {
@@ -17,7 +15,7 @@ export class DiGraph {
 			const seenOnThisWalk = new Set();
 			const toVisit = [...this.edges.get(node)];
 			while (toVisit.length > 0) {
-				const nextNode = toVisit.shift();
+				const nextNode = must(toVisit.shift());
 				if (seenOnThisWalk.has(nextNode)) {
 					return true; // cyclic
 				}
@@ -46,7 +44,7 @@ export class DiGraph {
 	}
 	topoSort() {
 		const inDegrees = this.indegrees();
-		const sources = [];
+		const sources: string[] = [];
 		for (const [node, count] of inDegrees.entries()) {
 			if (count === 0) {
 				sources.push(node);
@@ -58,7 +56,7 @@ export class DiGraph {
 		);
 		const topologicalOrdering = [];
 		while (sources.length > 0) {
-			const node = sources.pop();
+			const node = must(sources.pop());
 			topologicalOrdering.push(node);
 			const neighbours = this.edges.get(node) || new Set();
 			for (const neighbour of neighbours) {
@@ -75,15 +73,11 @@ export class DiGraph {
 		);
 		return topologicalOrdering.reverse();
 	}
-	/**
-	 * @param  {...string} entrypoints
-	 * @returns {Set<string>}
-	 */
-	walk(...entrypoints) {
-		const seen = new Set();
+	walk(...entrypoints: string[]): Set<string> {
+		const seen = new Set<string>();
 		// const toVisit = entrypoints;
 		while (entrypoints.length > 0) {
-			const next = entrypoints.shift();
+			const next = must(entrypoints.shift());
 			seen.add(next);
 			for (const dep of this.edges.get(next)) {
 				if (!seen.has(dep)) {
@@ -93,11 +87,7 @@ export class DiGraph {
 		}
 		return seen;
 	}
-	/**
-	 * @param {Set<string>} keep
-	 * @returns {DiGraph}
-	 */
-	subGraph(keep) {
+	subGraph(keep: Set<string>) {
 		const subGraph = new DiGraph();
 		for (const [node, deps] of this.edges) {
 			if (keep.has(node)) {
@@ -113,25 +103,11 @@ export class DiGraph {
 	}
 }
 
-/**
- * @template K
- * @template V
- * @extends {Map<K, V>}
- */
-class DefaultMap extends Map {
-	/**
-	 * @param {() => V} make
-	 */
-	constructor(make) {
+class DefaultMap<K, V> extends Map<K, V> {
+	constructor(private readonly make: () => V) {
 		super();
-		this.make = make;
 	}
-	/**
-	 *
-	 * @param {K} k
-	 * @returns {V}
-	 */
-	get(k) {
+	get(k: K): V {
 		if (this.has(k)) {
 			return must(super.get(k));
 		} else {
