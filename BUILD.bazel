@@ -1,0 +1,22 @@
+genrule(
+    name = "one",
+    srcs = ["who.txt"],
+    outs = ["one.txt"],
+    cmd = "cat $(location :who.txt) > $@; exit 1",
+)
+
+genrule(
+    name = "two",
+    outs = ["two.txt"],
+    cmd = "echo two: $$(pwd) > /dev/stderr; echo I am two! > $@",
+)
+
+genrule(
+    name = "combined",
+    srcs = [
+        ":one.txt",
+        ":two.txt",
+    ],
+    outs = ["combined.txt"],
+    cmd = "echo $(SRCS); cat $(SRCS) > $@ && exit 1",
+)
