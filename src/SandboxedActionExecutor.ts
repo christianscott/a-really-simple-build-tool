@@ -1,5 +1,5 @@
 import { strict as assert } from "assert";
-import { promises, existsSync } from "fs";
+import { promises as fs, existsSync } from "fs";
 import { join } from "path";
 import { Action } from "./Action";
 import { exec } from "./exec";
@@ -16,11 +16,11 @@ export class SandboxedActionExecutor {
 	async execute(action: Action) {
 		const sandboxDir = this.nextSandboxDir();
 
-		await promises.mkdir(sandboxDir, { recursive: true });
+		await fs.mkdir(sandboxDir, { recursive: true });
 
 		// symlink inputs from the execroot into the sandbox dir
 		for (const input of action.inputs) {
-			await promises.symlink(
+			await fs.symlink(
 				join(this.dirs.execroot, input),
 				join(sandboxDir, input),
 			);
@@ -41,10 +41,10 @@ export class SandboxedActionExecutor {
 		for (const out of action.outs) {
 			const absOutput = join(sandboxDir, out);
 			assert(existsSync(absOutput), "missing output");
-			await promises.rename(absOutput, join(this.dirs.execroot, out));
+			await fs.rename(absOutput, join(this.dirs.execroot, out));
 		}
 
-		await promises.rm(sandboxDir, { recursive: true, force: true });
+		await fs.rm(sandboxDir, { recursive: true, force: true });
 	}
 
 	nextSandboxDir() {

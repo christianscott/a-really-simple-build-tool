@@ -1,6 +1,8 @@
 one:
   rule: genrule
-  cmd: sleep 2; echo I am one! > one.txt
+  cmd: sleep 2; cat who.txt > one.txt
+  srcs:
+    - :who.txt
   outs:
     - one.txt
 

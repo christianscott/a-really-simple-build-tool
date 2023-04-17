@@ -3,7 +3,6 @@ import { createHash } from "crypto";
 export class Action {
 	constructor(
 		readonly name: string,
-		readonly srcs: string[],
 		readonly outs: string[],
 		readonly cmd: string,
 		readonly inputs: string[] = [],
@@ -12,11 +11,9 @@ export class Action {
 		this.inputs.push(...inputs);
 	}
 	key() {
+		throw new Error("unimplemented");
 		const hasher = createHash("sha256");
 		hasher.update(this.name);
-		for (const src of this.srcs) {
-			hasher.update(src);
-		}
 		for (const out of this.outs) {
 			hasher.update(out);
 		}

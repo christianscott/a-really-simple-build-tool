@@ -149,3 +149,27 @@ In english, with assistance from GPT-4:
 I actually think there might be a way to do something similar with the event loop. `await`ing a promise should be very cheap.
 
 I cannot figure out how bazel does it. The codebase is hard to read at the best of times, but the level of indirection in `AbstractParallelEvaluator` makes it nearly impossible https://sourcegraph.com/github.com/bazelbuild/bazel@952438d4c7c69beec3a1dc643d564c116e0e1542/-/blob/src/main/java/com/google/devtools/build/skyframe/AbstractParallelEvaluator.java?L61
+
+## how do input files from the workspace get into the sandbox?
+
+it looks like input files are first linked into the execroot, and then from the execroot into the sandbox:
+
+```
+# ll /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/sandbox/darwin-sandbox/6/execroot/__main__/
+total 0
+drwxr-xr-x  3 christian.s  wheel    96B  2 Apr 13:56 bazel-out/
+drwxr-xr-x  3 christian.s  wheel    96B  2 Apr 13:56 external/
+lrwxr-xr-x  1 christian.s  wheel    94B  2 Apr 13:56 who.txt@ -> /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/execroot/__main__/who.txt
+# ll /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/sandbox/darwin-sandbox/6/execroot/__main__/who.txt
+lrwxr-xr-x  1 christian.s  wheel    94B  2 Apr 13:56 /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/sandbox/darwin-sandbox/6/execroot/__main__/who.txt@ -> /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/execroot/__main__/who.txt
+# ll (readlink /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/sandbox/darwin-sandbox/6/execroot/__main__/who.txt)
+lrwxr-xr-x  1 christian.s  wheel    84B  2 Apr 13:56 /private/var/tmp/_bazel_christian.s/1656c0c543ef2bf12fc92766a305649f/execroot/__main__/who.txt@ -> /Users/christian.s/Code/github.com/christianscott/a-really-simple-build-tool/who.txt
+```
+
+## how should an input file from the workspace be resolved?
+
+output files are currently simpler to resolve because we can just iterate all targets and collect output files. input files are a bit less obvious, and will be less obvious once we have to support multiple packages.
+
+let's ignore multiple pacakges for now and solve the simplest case.
+
+simplest option is to try to read the file when it's referenced.

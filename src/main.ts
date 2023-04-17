@@ -1,7 +1,7 @@
-import * as url from "url";
 import { strict as assert } from "assert";
 import * as fs from "fs";
 import * as jsYAML from "js-yaml";
+import * as path from "path";
 import { DiGraph } from "./DiGraph";
 import { must } from "./must";
 import { Action } from "./Action";
@@ -75,6 +75,17 @@ async function main() {
 		};
 	} = config_;
 
+	const inputFiles = new Set<string>();
+	for (const dirent of fs.readdirSync(dirs.workspace)) {
+		if (dirent === "build.yaml") {
+			continue;
+		}
+		const stat = fs.statSync(dirent);
+		if (!stat.isDirectory()) {
+			inputFiles.add(makeLabel(pkg, dirent));
+		}
+	}
+
 	// used to verify that labels exist
 	const targets: Set<string> = new Set();
 	// collect target names
@@ -105,8 +116,11 @@ async function main() {
 			resolvedLabelsToBuild.push(must(outputFiles.get(labelToBuild)));
 			continue;
 		}
+		// TODO: special error for trying to build inputs
 		throw new Error(`could not resolve target ${labelToBuild}`);
 	}
+
+	fs.mkdirSync(dirs.execroot, { recursive: true });
 
 	// build up the graph
 	const actions: Map<string, Action> = new Map();
@@ -115,10 +129,24 @@ async function main() {
 	for (const [name, conf] of Object.entries(config)) {
 		const label = makeLabel(pkg, name);
 		const { srcs = [] } = conf;
+		const inputFileSrcs = [];
 		for (const src of srcs) {
-			graph.insert(label, normalizeLabel(src));
+			const normalizedLabel = normalizeLabel(src);
+			if (inputFiles.has(normalizedLabel)) {
+				const filepath = normalizedLabel.replace(/^\/\//, "").replace(/^:/, "");
+				fs.symlinkSync(
+					path.join(dirs.workspace, filepath),
+					path.join(dirs.execroot, filepath),
+				);
+				inputFileSrcs.push(filepath);
+				continue;
+			}
+			graph.insert(label, normalizedLabel);
 		}
-		actions.set(label, new Action(name, [], conf.outs ?? [], conf.cmd));
+		actions.set(
+			label,
+			new Action(name, conf.outs ?? [], conf.cmd, inputFileSrcs),
+		);
 	}
 	assert(!graph.isCyclic(), "build graph must not be cyclic");
 
@@ -129,10 +157,14 @@ async function main() {
 	const executor = new SandboxedActionExecutor(dirs);
 	const tasks: Map<string, Task> = new Map();
 	for (const label of ordering) {
-		const action = must(actions.get(label));
+		const action = must(
+			actions.get(label),
+			`could not find corresponding action for ${label}`,
+		);
 		const deps = graph.edges.get(label);
 		for (const dep of deps) {
 			const depAction = must(actions.get(dep));
+			// TODO: filter outputs that are not specified as inputs
 			action.addInputs(depAction.outputs());
 		}
 		const depTasks = [...deps].map((dep) => must(tasks.get(dep)));
@@ -149,13 +181,22 @@ async function main() {
 		if (!label.startsWith(":")) {
 			throw new Error("unimplemented");
 		}
+
 		const fullLabel = "//" + pkg + label;
 		if (targets.has(fullLabel)) {
 			return fullLabel;
 		}
+
 		const target = outputFiles.get(fullLabel);
-		assert(target != null, `could not resolve target ${label}`);
-		return target;
+		if (target != null) {
+			return target;
+		}
+
+		if (inputFiles.has(fullLabel)) {
+			return fullLabel;
+		}
+
+		throw new Error(`could not resolve label ${label}`);
 	}
 }
 

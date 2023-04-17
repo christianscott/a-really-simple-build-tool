@@ -7,10 +7,12 @@
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "main.js",
+			"name": "main.ts",
 			"skipFiles": ["<node_internals>/**"],
-			"program": "${workspaceFolder}/src/main.js",
-			"args": ["build", "//:combined.txt"]
+			"program": "${workspaceFolder}/src/main.ts",
+			"runtimeArgs": ["-r", "esbuild-register"],
+			"args": ["build", "//:combined.txt"],
+			"cwd": "${workspaceFolder}/examples/txt"
 		}
 	]
 }

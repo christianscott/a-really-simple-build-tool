@@ -1,1 +1,5 @@
-node -r esbuild-register src/main.ts $@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd examples/txt
+node -r esbuild-register ../../src/main.ts $@
