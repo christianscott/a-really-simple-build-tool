@@ -75,6 +75,7 @@ async function main() {
 		};
 	} = config_;
 
+	// used to verify that labels exist
 	const targets: Set<string> = new Set();
 	// collect target names
 	for (const name of Object.keys(config)) {
@@ -82,43 +83,46 @@ async function main() {
 	}
 
 	// assosciate files with targets
-	const files: Map<string, string> = new Map();
+	// used to find the target that is responsible for creating a file
+	const outputFiles: Map<string, string> = new Map();
 	for (const [name, { outs = [] }] of Object.entries(config)) {
 		for (const out of outs) {
-			files.set(makeLabel(pkg, out), makeLabel(pkg, name));
+			outputFiles.set(makeLabel(pkg, out), makeLabel(pkg, name));
 		}
 	}
 
-	const resolvedTargetsToBuild = [];
-	for (let targetToBuild of args.targetsToBuild) {
-		if (!targetToBuild.startsWith("//")) {
-			targetToBuild = `//${targetToBuild}`;
+	// list of labels to build
+	const resolvedLabelsToBuild = [];
+	for (let labelToBuild of args.targetsToBuild) {
+		if (!labelToBuild.startsWith("//")) {
+			labelToBuild = `//${labelToBuild}`;
 		}
-		if (targets.has(targetToBuild)) {
-			resolvedTargetsToBuild.push(targetToBuild);
+		if (targets.has(labelToBuild)) {
+			resolvedLabelsToBuild.push(labelToBuild);
 			continue;
 		}
-		if (files.has(targetToBuild)) {
-			resolvedTargetsToBuild.push(must(files.get(targetToBuild)));
+		if (outputFiles.has(labelToBuild)) {
+			resolvedLabelsToBuild.push(must(outputFiles.get(labelToBuild)));
 			continue;
 		}
-		throw new Error(`could not resolve target ${targetToBuild}`);
+		throw new Error(`could not resolve target ${labelToBuild}`);
 	}
 
 	// build up the graph
 	const actions: Map<string, Action> = new Map();
+	// label to label graph
 	const graph = new DiGraph();
 	for (const [name, conf] of Object.entries(config)) {
 		const label = makeLabel(pkg, name);
 		const { srcs = [] } = conf;
 		for (const src of srcs) {
-			graph.insert(label, getTargetForLabel(src));
+			graph.insert(label, normalizeLabel(src));
 		}
 		actions.set(label, new Action(name, [], conf.outs ?? [], conf.cmd));
 	}
 	assert(!graph.isCyclic(), "build graph must not be cyclic");
 
-	const transitiveDeps = graph.walk(...resolvedTargetsToBuild);
+	const transitiveDeps = graph.walk(...resolvedLabelsToBuild);
 	const ordering = graph.subGraph(transitiveDeps).topoSort();
 
 	const limiter = new ConcurrencyLimiter(args.jobs);
@@ -141,7 +145,7 @@ async function main() {
 	}
 	await Promise.all([...tasks.values()].map((task) => task.run()));
 
-	function getTargetForLabel(label: string): string {
+	function normalizeLabel(label: string): string {
 		if (!label.startsWith(":")) {
 			throw new Error("unimplemented");
 		}
@@ -149,7 +153,7 @@ async function main() {
 		if (targets.has(fullLabel)) {
 			return fullLabel;
 		}
-		const target = files.get(fullLabel);
+		const target = outputFiles.get(fullLabel);
 		assert(target != null, `could not resolve target ${label}`);
 		return target;
 	}
