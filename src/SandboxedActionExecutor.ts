@@ -28,9 +28,14 @@ export class SandboxedActionExecutor {
 
 		// execute the genrule
 		console.error("Executing genrule for " + action.name);
+		let cmd = [`set -euo pipefail`];
+		if (action.outs.length === 1) {
+			cmd.push(`out() { echo ${action.outs[0]}; }`);
+		}
+		cmd.push(action.cmd);
 		await exec({
 			cmd: "bash",
-			args: ["-c", "set -euo pipefail; " + action.cmd],
+			args: ["-c", cmd.join("\n")],
 			opts: {
 				stdio: "inherit",
 				cwd: sandboxDir,
@@ -40,7 +45,7 @@ export class SandboxedActionExecutor {
 		// ensure outputs were created & symlink to the execroot
 		for (const out of action.outs) {
 			const absOutput = join(sandboxDir, out);
-			assert(existsSync(absOutput), "missing output");
+			assert(existsSync(absOutput), `output ${out} was not created`);
 			await fs.rename(absOutput, join(this.dirs.execroot, out));
 		}
 

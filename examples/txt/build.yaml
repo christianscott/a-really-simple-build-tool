@@ -1,6 +1,6 @@
 one:
   rule: genrule
-  cmd: sleep 2; cat who.txt > one.txt
+  cmd: sleep 2; cat who.txt > $(out)
   srcs:
     - :who.txt
   outs:
@@ -8,7 +8,7 @@ one:
 
 two:
   rule: genrule
-  cmd: sleep 2; echo I am two > two.txt
+  cmd: sleep 2; node -e 'console.log(`I am two`)' > $(out)
   outs:
     - two.txt
 
