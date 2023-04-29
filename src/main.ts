@@ -122,6 +122,7 @@ async function main() {
 
 	fs.mkdirSync(dirs.execroot, { recursive: true });
 
+	const linkedInputFiles = new Set<string>();
 	// build up the graph
 	const actions: Map<string, Action> = new Map();
 	// label to label graph
@@ -133,11 +134,24 @@ async function main() {
 		for (const src of srcs) {
 			const normalizedLabel = normalizeLabel(src);
 			if (inputFiles.has(normalizedLabel)) {
-				const filepath = normalizedLabel.replace(/^\/\//, "").replace(/^:/, "");
-				fs.symlinkSync(
-					path.join(dirs.workspace, filepath),
-					path.join(dirs.execroot, filepath),
-				);
+				const filepath = normalizedLabel
+					.replace(/^\/\//, "") // strip leading '//'
+					.replace(/^:/, ""); // strip leading ':'
+				if (!linkedInputFiles.has(filepath)) {
+					// attempt to unlink the file if it already exists
+					try {
+						fs.unlinkSync(path.join(dirs.execroot, filepath));
+					} catch (e: any) {
+						if (e.code !== "ENOENT") {
+							throw e;
+						}
+					}
+					fs.symlinkSync(
+						path.join(dirs.workspace, filepath),
+						path.join(dirs.execroot, filepath),
+					);
+					linkedInputFiles.add(filepath);
+				}
 				inputFileSrcs.push(filepath);
 				continue;
 			}
