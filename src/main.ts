@@ -1,14 +1,15 @@
-import { strict as assert } from "assert";
+import {strict as assert} from "assert";
 import * as fs from "fs";
 import * as jsYAML from "js-yaml";
 import * as path from "path";
-import { DiGraph } from "./DiGraph";
-import { must } from "./must";
-import { Action } from "./Action";
-import { SandboxedActionExecutor } from "./SandboxedActionExecutor";
-import { Task } from "./Task";
-import { ConcurrencyLimiter } from "./ConcurrencyLimiter";
-import { getDirs } from "./dirs";
+import {DiGraph} from "./DiGraph";
+import {must} from "./must";
+import {Action} from "./Action";
+import {SandboxedActionExecutor} from "./SandboxedActionExecutor";
+import {Task} from "./Task";
+import {ConcurrencyLimiter} from "./ConcurrencyLimiter";
+import {getDirs} from "./dirs";
+import {parse, t} from "./parse";
 
 const mode = {
 	build: 0,
@@ -62,18 +63,17 @@ async function main() {
 		"missing targets to build",
 	);
 
+	const configT = t.dict(t.struct({
+		rule: t.string,
+		cmd: t.string,
+		srcs: t.optional(t.array(t.string)),
+		outs: t.optional(t.array(t.string)),
+	}));
+
 	const pkg = "";
-	const config_ = jsYAML.load(
-		fs.readFileSync("./build.yaml", { encoding: "utf-8" }),
-	);
-	const config: {
-		[key: string]: {
-			rule: string;
-			cmd: string;
-			srcs?: string[];
-			outs?: string[];
-		};
-	} = config_;
+	const config = parse(configT, jsYAML.load(
+		fs.readFileSync("./build.yaml", {encoding: "utf-8"}),
+	));
 
 	const inputFiles = new Set<string>();
 	for (const dirent of fs.readdirSync(dirs.workspace)) {
