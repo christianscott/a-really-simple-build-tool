@@ -3,7 +3,10 @@ load("@rules_proto_grpc//js:defs.bzl", "js_grpc_node_compile")
 
 proto_library(
     name = "remote_execution_proto",
-    srcs = glob(["proto/*.proto"]),
+    srcs = glob(
+        ["*.proto"],
+        allow_empty = False,
+    ),
     deps = [
         "@com_google_protobuf//:any_proto",
         "@com_google_protobuf//:duration_proto",
@@ -17,5 +20,7 @@ proto_library(
 
 js_grpc_node_compile(
     name = "remote_execution_js",
-    protos = [":remote_execution_proto"],
+    protos = [
+        ":remote_execution_proto",
+    ],
 )

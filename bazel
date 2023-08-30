@@ -2,4 +2,4 @@
 set -euo pipefail
 
 cd examples/txt
-node -r esbuild-register ../../src/main.ts $@
+node -r esbuild-register ../../src/main.ts "$@"
