@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-go build -o notbzl main.go
+go build -o notbzl ./*.go
 cd examples/txt
 ../../notbzl "$@"

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -15,16 +16,27 @@ import (
 
 func main() {
 	args := must(parseArgs(os.Args))
+	dirs := must(getDirs())
 	switch args.mode {
 	case modeBuild:
-		must(build(args.targetsToBuild))
+		must(build(args.targetsToBuild, dirs))
 	case modeInfo:
-		fmt.Println("info")
+		fmt.Println("workspace:", dirs.workspace)
+		fmt.Println("execroot:", dirs.execroot)
+	case modeClean:
+		if err := os.RemoveAll(dirs.execroot); err != nil {
+			panic(err)
+		}
 	}
 }
 
-func build(targetsToBuild []string) (interface{}, error) {
-	dirs := must(getDirs())
+func build(targetsToBuild []string, dirs dirs) (interface{}, error) {
+	rc, err := dialRemoteCache("localhost:9999", dirs.execroot)
+	if err != nil {
+		panic(err)
+	}
+	defer rc.close()
+
 	configs := []config{
 		{
 			name: "one",
@@ -142,12 +154,7 @@ func build(targetsToBuild []string) (interface{}, error) {
 			graph.insert(label, normalizedLabel)
 		}
 
-		actions[label] = action{
-			name:   conf.name,
-			inputs: inputFileSrcs,
-			outs:   conf.outs,
-			cmd:    conf.cmd,
-		}
+		actions[label] = makeGenruleAction(conf.name, conf.cmd, inputFileSrcs, conf.outs)
 	}
 
 	transitive := graph.walk(resolvedLabelsToBuild)
@@ -156,7 +163,9 @@ func build(targetsToBuild []string) (interface{}, error) {
 
 	var wg sync.WaitGroup
 	tasks := make(map[string]task)
-	executor := sandboxedActionExecutor{execroot: dirs.execroot}
+	mu := sync.Mutex{}
+	results := []actionResult{}
+	runner := sandboxedActionRunner{execroot: dirs.execroot}
 	for _, label := range order {
 		action, ok := actions[label]
 		if !ok {
@@ -176,14 +185,32 @@ func build(targetsToBuild []string) (interface{}, error) {
 			if !ok {
 				panic("could not find action for dep: " + dep)
 			}
-			action.inputs = append(action.inputs, da.outs...)
+			action.ins = append(action.ins, da.outs...)
 		}
 
 		t := task{
 			execute: func() error {
 				fmt.Println("executing", action.name)
 				defer wg.Done()
-				return executor.execute(action)
+				res, isNotFoundErr, err := rc.getActionResult(action)
+				if err != nil {
+					if isNotFoundErr {
+						res, err = runner.run(action)
+					} else {
+						return err
+					}
+				} else {
+					for _, out := range res.outputFiles {
+						err := os.WriteFile(filepath.Join(dirs.execroot, out.path), out.contents, 0644)
+						if err != nil {
+							return err
+						}
+					}
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				results = append(results, *res)
+				return err
 			},
 			deps:     deps,
 			finished: make(chan struct{}),
@@ -195,14 +222,36 @@ func build(targetsToBuild []string) (interface{}, error) {
 
 	wg.Wait()
 
+	for _, res := range results {
+		if !res.fromActionCache {
+			rc.updateActionResult(res)
+		}
+	}
+
 	return nil, nil
 }
 
 type action struct {
-	name   string
-	inputs []string
-	outs   []string
-	cmd    string
+	name string
+	ins  []string
+	outs []string
+	args []string
+}
+
+func makeGenruleAction(name, cmd string, srcs, outs []string) action {
+	prog := []string{`set -ueo pipefail`}
+	if len(outs) == 1 {
+		outFn := fmt.Sprintf("out() { echo %s; }", outs[0])
+		prog = append(prog, outFn)
+	}
+	prog = append(prog, cmd)
+	args := []string{"bash", "-c", strings.Join(prog, "\n")}
+	return action{
+		name: name,
+		ins:  srcs,
+		outs: outs,
+		args: args,
+	}
 }
 
 type task struct {
@@ -224,47 +273,81 @@ func (t *task) wait() {
 	<-t.finished
 }
 
-type sandboxedActionExecutor struct {
+type outputFile struct {
+	path     string
+	contents []byte
+}
+
+type actionResult struct {
+	action      action
+	exitCode    int32
+	outputFiles []outputFile
+	stderr      []byte
+	stdout      []byte
+	/// true if this was loaded from the action cache. implies that the action should be written to the AC
+	fromActionCache bool
+}
+
+type sandboxedActionRunner struct {
 	nextSandboxID atomic.Uint64
 	execroot      string
 }
 
-func (ae *sandboxedActionExecutor) execute(action action) error {
+func (ae *sandboxedActionRunner) run(action action) (*actionResult, error) {
 	sandboxDir := ae.nextSandboxDir()
 	if err := os.MkdirAll(sandboxDir, 0755); err != nil {
-		return err
+		return nil, err
 	}
 	defer os.RemoveAll(sandboxDir)
-	for _, input := range action.inputs {
+	for _, input := range action.ins {
 		if err := os.Link(filepath.Join(ae.execroot, input), filepath.Join(sandboxDir, input)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	prog := []string{`set -ueo pipefail`}
-	if len(action.outs) == 1 {
-		outFn := fmt.Sprintf("out() { echo %s; }", action.outs[0])
-		prog = append(prog, outFn)
-	}
-	prog = append(prog, action.cmd)
-	cmd := exec.Command("bash", "-c", strings.Join(prog, "\n"))
+	cmd := exec.Command(action.args[0], action.args[1:]...)
 	cmd.Dir = sandboxDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return err
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return &actionResult{
+				action:   action,
+				exitCode: int32(exitErr.ExitCode()),
+				stdout:   stdout.Bytes(),
+				stderr:   stderr.Bytes(),
+			}, nil
+		}
+		return nil, err
 	}
 
+	outputFiles := []outputFile{}
 	for _, out := range action.outs {
-		if err := os.Rename(filepath.Join(sandboxDir, out), filepath.Join(ae.execroot, out)); err != nil {
-			return err
+		absOut := filepath.Join(sandboxDir, out)
+		contents, err := os.ReadFile(absOut)
+		if err != nil {
+			return nil, err
+		}
+		outputFiles = append(outputFiles, outputFile{
+			path:     out,
+			contents: contents,
+		})
+		if err := os.Rename(absOut, filepath.Join(ae.execroot, out)); err != nil {
+			return nil, err
 		}
 	}
 
-	return nil
+	return &actionResult{
+		action:      action,
+		exitCode:    0,
+		stdout:      stdout.Bytes(),
+		stderr:      stderr.Bytes(),
+		outputFiles: outputFiles,
+	}, nil
 }
 
-func (ae *sandboxedActionExecutor) nextSandboxDir() string {
+func (ae *sandboxedActionRunner) nextSandboxDir() string {
 	return filepath.Join(ae.execroot, "sandbox", fmt.Sprintf("%d", ae.nextSandboxID.Add(1)))
 }
 
@@ -385,7 +468,7 @@ func parseArgs(argv []string) (args, error) {
 	}
 
 	mode := mode(argv[1])
-	if mode != modeBuild && mode != modeInfo {
+	if mode != modeBuild && mode != modeInfo && mode != modeClean {
 		return args{}, errInvalidMode
 	}
 
@@ -419,6 +502,7 @@ type mode string
 const (
 	modeBuild mode = "build"
 	modeInfo  mode = "info"
+	modeClean mode = "clean"
 )
 
 type dirs struct {
