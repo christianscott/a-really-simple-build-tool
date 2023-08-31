@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+go build -o notbzl main.go
 cd examples/txt
-node -r esbuild-register ../../src/main.ts $@
+../../notbzl "$@"

@@ -5,13 +5,33 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Debug main.go",
+			"type": "go",
+			"request": "launch",
+			"mode": "debug",
+			"program": "main.go",
+			"cwd": "${workspaceFolder}/examples/txt",
+			"args": [
+				"build",
+				"//:combined.txt"
+			],
+		},
+		{
 			"type": "node",
 			"request": "launch",
 			"name": "main.ts",
-			"skipFiles": ["<node_internals>/**"],
+			"skipFiles": [
+				"<node_internals>/**"
+			],
 			"program": "${workspaceFolder}/src/main.ts",
-			"runtimeArgs": ["-r", "esbuild-register"],
-			"args": ["build", "//:combined.txt"],
+			"runtimeArgs": [
+				"-r",
+				"esbuild-register"
+			],
+			"args": [
+				"build",
+				"//:combined.txt"
+			],
 			"cwd": "${workspaceFolder}/examples/txt"
 		}
 	]
