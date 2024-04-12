@@ -1,6 +1,8 @@
 {
 	"editor.formatOnSave": true,
-	"editor.insertSpaces": false,
-	"editor.tabSize": 8,
+	"[go]": {
+		"editor.tabSize": 8,
+		"editor.insertSpaces": false,
+	},
 	"typescript.tsdk": "node_modules/typescript/lib"
 }
