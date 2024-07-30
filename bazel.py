@@ -96,25 +96,13 @@ def clean(workspace: pathlib.Path):
 
 
 def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
-    actions = [
-        genrule(
-            name="one",
-            cmd="sleep 2; cat who.txt > $(out)",
-            srcs=[":who.txt"],
-            outs=["one.txt"],
-        ),
-        genrule(
-            name="two",
-            cmd="sleep 2; echo I am two > $(out)",
-            outs=["two.txt"],
-        ),
-        genrule(
-            name="combined",
-            cmd="sleep 1; cat one.txt two.txt > $(out)",
-            srcs=[":one.txt", ":two.txt"],
-            outs=["combined.txt"],
-        ),
-    ]
+    with open('./examples/txt/BUILD.bazel', 'r') as file:
+        contents = file.read()
+
+    actions: list[Action] = []
+    exec(contents, {}, {
+        "genrule": lambda *_args, **kwargs: actions.append(genrule(**kwargs))
+    })
     label_to_action: dict[Label, Action] = {action.target: action for action in actions}
 
     targets: dict[Label, Target] = dict()
@@ -221,6 +209,10 @@ def genrule(
     srcs: list[str] | None = None,
     outs: list[str],
 ) -> Action:
+    assert name is not None, "missing name"
+    assert cmd is not None, "missing cmd"
+    assert len(outs) > 0, "genrule must have at least one output files"
+
     srcs = srcs if srcs is not None else []
     src_labels = [Label(f"//{src}") for src in srcs]
     out_labels = [Label(f"//:{out}") for out in outs]
