@@ -285,6 +285,7 @@ class Digraph:
     def reverse(self) -> "Digraph":
         reverse = Digraph()
         for label, deps in self.edges.items():
+            reverse.edges[label] # ensure that nodes with no dependees are retained
             for dep in deps:
                 reverse.insert(dep, label)
         return reverse
