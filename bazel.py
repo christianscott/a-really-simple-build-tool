@@ -6,12 +6,14 @@ import hashlib
 import json
 import os
 import pathlib
+import pickle
 import queue
 import shutil
 import subprocess
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 
 class Label:
@@ -35,8 +37,19 @@ class Label:
         return self.label.replace("//:", "")
 
 
+class Serde(abc.ABC):
+    def serialize(self) -> bytes:
+        return pickle.dumps(self)
+
+    @classmethod
+    def deserialize(cls, raw: bytes):
+        obj = pickle.loads(raw)
+        assert isinstance(obj, cls)
+        return obj
+
+
 @dataclass
-class Action:
+class Action(Serde):
     target: Label
     args: list[str]
     outs: list[Label]
@@ -44,32 +57,11 @@ class Action:
 
 
 @dataclass
-class ActionResult:
+class ActionResult(Serde):
     exit_code: int
     stdout: bytes
     stderr: bytes
     outputs: dict[str, str]
-
-    def as_json(self) -> str:
-        return json.dumps(
-            {
-                "exit_code": self.exit_code,
-                "outputs": self.outputs,
-                "stderr": self.stderr.decode("utf-8"),
-                "stdout": self.stdout.decode("utf-8"),
-            }
-        )
-
-    @staticmethod
-    def from_json(json_str: str) -> "ActionResult":
-        obj = json.loads(json_str)
-        assert isinstance(obj, dict)
-        return ActionResult(
-            exit_code=obj["exit_code"],
-            outputs=obj["outputs"],
-            stderr=obj["stderr"].encode("utf-8"),
-            stdout=obj["stdout"].encode("utf-8"),
-        )
 
 
 class Target(abc.ABC):
@@ -96,7 +88,7 @@ def clean(workspace: pathlib.Path):
 
 
 def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
-    with open('./examples/txt/BUILD.bazel', 'r') as file:
+    with open("./examples/txt/BUILD.bazel", "r") as file:
         contents = file.read()
 
     actions: list[Action] = []
@@ -161,7 +153,8 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     runner = ActionRunner(
         execroot=execroot,
         targets=targets,
-        cache=Cache(cachedir=execroot / ".cache"),
+        cache=FileSystemCache(cachedir=execroot / ".cache"),
+        spawner=SandboxedActionSpawner(execroot=execroot, targets=targets),
     )
 
     ready: queue.Queue[Label] = queue.Queue()
@@ -283,7 +276,12 @@ class Digraph:
         return reverse
 
 
-class Cache:
+class Cache(Protocol):
+    def get_action_result(self, key: str) -> ActionResult | None: ...
+    def update_action_result(self, key: str, result: ActionResult): ...
+
+
+class FileSystemCache:
     def __init__(self, cachedir: pathlib.Path) -> None:
         self.cachedir = cachedir
         cachedir.mkdir(parents=True, exist_ok=True)
@@ -292,81 +290,29 @@ class Cache:
         p = self.cachedir / key
         if not p.exists():
             return None
-        return ActionResult.from_json(p.read_text("utf-8"))
+        return ActionResult.deserialize(p.read_bytes())
 
     def update_action_result(self, key: str, result: ActionResult):
-        (self.cachedir / key).write_bytes(result.as_json().encode("utf-8"))
+        (self.cachedir / key).write_bytes(result.serialize())
 
 
-@dataclass
-class CacheHitStats:
-    hits: int = 0
-    misses: int = 0
+class Spawner(Protocol):
+    def spawn_action(self, action: Action) -> ActionResult: ...
 
 
-class ActionRunner:
-    _execroot: pathlib.Path
-    _targets: dict[Label, Target]
-    _cache: Cache
+class SandboxedActionSpawner(Spawner):
     _already_linked_paths: set[str]
     _next_sandbox_id: int
-    cache_hit_stats: CacheHitStats
+    _targets: dict[Label, Target]
+    _execroot: pathlib.Path
 
-    def __init__(
-        self,
-        execroot: pathlib.Path,
-        targets: dict[Label, Target],
-        cache: Cache,
-    ) -> None:
-        self._execroot = execroot
-        self._targets = targets
-        self._cache = cache
+    def __init__(self, targets: dict[Label, Target], execroot: pathlib.Path) -> None:
         self._already_linked_paths = set()
         self._next_sandbox_id = 0
-        self.cache_hit_stats = CacheHitStats()
+        self._targets = targets
+        self._execroot = execroot
 
-    def run(self, action: Action) -> ActionResult:
-        # link all referenced workspace files into the execroot
-        for src in action.srcs:
-            target = self._targets[src]
-            if not isinstance(target, WorkspaceFileTarget):
-                continue
-
-            src_path = src.path()
-            if src_path in self._already_linked_paths:
-                continue
-            dest = self._execroot / src_path
-            dest.unlink(missing_ok=True)
-            dest.hardlink_to(workspace / src_path)
-            self._already_linked_paths.add(src_path)
-
-        action_key = self._hash_action(action, self._execroot)
-
-        result = self._cache.get_action_result(action_key)
-        if result is None:
-            self.cache_hit_stats.misses += 1
-            result = self._spawn_action(action=action)
-            if result.exit_code == 0:
-                self._cache.update_action_result(action_key, result)
-        else:
-            self.cache_hit_stats.hits += 1
-            for file, contents in result.outputs.items():
-                (self._execroot / file).write_text(contents, encoding="utf-8")
-
-        return result
-
-    def _hash_action(self, action: Action, execroot: pathlib.Path) -> str:
-        hasher = hashlib.sha256()
-        hasher.update(" ".join(action.args).encode())
-        hasher.update(" ".join(out.path() for out in action.outs).encode())
-
-        for src in action.srcs:
-            content = execroot.joinpath(src.path()).read_bytes()
-            hasher.update(content)
-
-        return hasher.hexdigest()
-
-    def _spawn_action(self, action: Action) -> ActionResult:
+    def spawn_action(self, action: Action) -> ActionResult:
         sandbox_dir = self._get_next_sandbox_dir()
 
         for src in action.srcs:
@@ -413,6 +359,76 @@ class ActionRunner:
         assert not sandbox_dir.exists(), f"sandbox dir {sandbox_dir} already exists"
         sandbox_dir.mkdir(parents=True, exist_ok=False)
         return sandbox_dir
+
+
+@dataclass
+class CacheHitStats:
+    hits: int = 0
+    misses: int = 0
+
+
+class ActionRunner:
+    _execroot: pathlib.Path
+    _targets: dict[Label, Target]
+    _cache: Cache
+    _spawner: Spawner
+    cache_hit_stats: CacheHitStats
+
+    def __init__(
+        self,
+        execroot: pathlib.Path,
+        targets: dict[Label, Target],
+        cache: Cache,
+        spawner: Spawner,
+    ) -> None:
+        self._execroot = execroot
+        self._targets = targets
+        self._cache = cache
+        self._already_linked_paths = set()
+        self._next_sandbox_id = 0
+        self.cache_hit_stats = CacheHitStats()
+        self._spawner = spawner
+
+    def run(self, action: Action) -> ActionResult:
+        # link all referenced workspace files into the execroot
+        for src in action.srcs:
+            target = self._targets[src]
+            if not isinstance(target, WorkspaceFileTarget):
+                continue
+
+            src_path = src.path()
+            if src_path in self._already_linked_paths:
+                continue
+            dest = self._execroot / src_path
+            dest.unlink(missing_ok=True)
+            dest.hardlink_to(workspace / src_path)
+            self._already_linked_paths.add(src_path)
+
+        action_key = self._hash_action(action, self._execroot)
+
+        result = self._cache.get_action_result(action_key)
+        if result is None:
+            self.cache_hit_stats.misses += 1
+            result = self._spawner.spawn_action(action=action)
+            if result.exit_code == 0:
+                self._cache.update_action_result(action_key, result)
+        else:
+            self.cache_hit_stats.hits += 1
+            for file, contents in result.outputs.items():
+                (self._execroot / file).write_text(contents, encoding="utf-8")
+
+        return result
+
+    def _hash_action(self, action: Action, execroot: pathlib.Path) -> str:
+        hasher = hashlib.sha256()
+        hasher.update(" ".join(action.args).encode())
+        hasher.update(" ".join(out.path() for out in action.outs).encode())
+
+        for src in action.srcs:
+            content = execroot.joinpath(src.path()).read_bytes()
+            hasher.update(content)
+
+        return hasher.hexdigest()
 
 
 if __name__ == "__main__":
