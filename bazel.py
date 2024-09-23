@@ -181,7 +181,7 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
         execroot=execroot,
         targets=targets,
         cache=LocalActionCache(cachedir=cachedir),
-        executor=SandboxedActionExecutor(execroot=execroot, local_cas=local_cas),
+        executor=SandboxedActionExecutor(execroot=execroot, cas=local_cas),
         cas=LocalCAS(cachedir=cachedir)
     )
 
@@ -369,21 +369,24 @@ class ActionExecutor(Protocol):
 class SandboxedActionExecutor(ActionExecutor):
     _already_linked_paths: set[str]
     _next_sandbox_id: int
-    _local_cas: LocalCAS
+    _cas: CAS
     _execroot: pathlib.Path
 
-    def __init__(self, local_cas: LocalCAS, execroot: pathlib.Path) -> None:
+    def __init__(self, cas: CAS, execroot: pathlib.Path) -> None:
         self._already_linked_paths = set()
         self._next_sandbox_id = 0
-        self._local_cas = local_cas
+        self._cas = cas
         self._execroot = execroot
 
     def execute(self, action: Action) -> ActionResult:
         sandbox_dir = self._get_next_sandbox_dir()
 
         for input in action.ins:
-            # TODO: handle remote CAS
-            self._local_cas.link_entry_to(input.digest, sandbox_dir / input.filename)
+            if isinstance(self._cas, LocalCAS):
+                self._cas.link_entry_to(input.digest, sandbox_dir / input.filename)
+            else:
+                # TODO: handle remote CAS
+                raise Exception("unimplemented")
 
         result = subprocess.run(
             action.args,
