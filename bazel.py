@@ -2,6 +2,7 @@ import abc
 import argparse
 import collections
 import dataclasses
+import json
 import hashlib
 import os
 import pathlib
@@ -10,6 +11,7 @@ import queue
 import shutil
 import subprocess
 import threading
+
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -48,11 +50,27 @@ class Serde(abc.ABC):
 
 
 @dataclass
-class Action(Serde):
-    target: Label
+class ActionInput:
+    filename: str
+    digest: str
+
+
+@dataclass
+class Action:
     args: list[str]
-    outs: list[Label]
-    srcs: list[Label] = dataclasses.field(default_factory=list)
+    # note: bazel uses a merkle tree but a list of digests & filenames is good enough for a toy build system
+    ins: list[ActionInput]
+    outs: list[str]
+
+    def hash(self) -> str:
+        as_bytes = json.dumps({
+            "args": self.args,
+            "ins": [{ "filename": i.filename, "digest": i.digest } for i in self.ins],
+            "outs": self.outs
+        }).encode()
+        hasher = hashlib.sha256()
+        hasher.update(as_bytes)
+        return hasher.hexdigest()
 
 
 @dataclass
@@ -61,6 +79,14 @@ class ActionResult(Serde):
     stdout: bytes
     stderr: bytes
     outputs: dict[str, str]
+
+
+@dataclass
+class InternalAction(Serde):
+    target: Label
+    args: list[str]
+    outs: list[Label]
+    srcs: list[Label] = dataclasses.field(default_factory=list)
 
 
 class Target(abc.ABC):
@@ -90,11 +116,11 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     with open("./examples/txt/BUILD.bazel", "r") as file:
         contents = file.read()
 
-    actions: list[Action] = []
+    actions: list[InternalAction] = []
     exec(contents, {}, {
         "genrule": lambda *_args, **kwargs: actions.append(genrule(**kwargs))
     })
-    label_to_action: dict[Label, Action] = {action.target: action for action in actions}
+    label_to_action: dict[Label, InternalAction] = {action.target: action for action in actions}
 
     targets: dict[Label, Target] = dict()
 
@@ -149,23 +175,31 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     indegrees = dependees.indegrees()
     sources = [label for label, count in indegrees.items() if count == 0]
 
+    cachedir=execroot / ".cache"
+    local_cas = LocalCAS(cachedir=cachedir)
     runner = ActionRunner(
         execroot=execroot,
         targets=targets,
-        cache=FileSystemActionCache(cachedir=execroot / ".cache"),
-        spawner=SandboxedActionSpawner(execroot=execroot, targets=targets),
+        cache=LocalActionCache(cachedir=cachedir),
+        executor=SandboxedActionExecutor(execroot=execroot, local_cas=local_cas),
+        cas=LocalCAS(cachedir=cachedir)
     )
 
     ready: queue.Queue[Label] = queue.Queue()
     for label in sources:
         ready.put_nowait(label)
 
+    errors: list[Exception] = []
     def worker():
         while True:
             label = ready.get()
 
             print(f"executing {label.label}")
-            runner.run(label_to_action[label])
+            try:
+                runner.run(label_to_action[label])
+            except Exception as e:
+                e.add_note(f"while executing '{label.label}'")
+                errors.append(e)
 
             # schedule all ready dependees
             for dep in dependees.edges[label]:
@@ -178,6 +212,9 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     for _ in range(jobs):
         threading.Thread(target=worker, daemon=True).start()
     ready.join()
+
+    if len(errors) > 0:
+        raise errors[0]
 
     stats = runner.cache_hit_stats
     if stats.misses == 0:
@@ -200,7 +237,7 @@ def genrule(
     cmd: str,
     srcs: list[str] | None = None,
     outs: list[str],
-) -> Action:
+) -> InternalAction:
     assert name is not None, "missing name"
     assert cmd is not None, "missing cmd"
     assert len(outs) > 0, "genrule must have at least one output files"
@@ -215,7 +252,7 @@ def genrule(
     cmd_lines.append(cmd)
     args = ["bash", "-c", "\n".join(cmd_lines)]
 
-    return Action(
+    return InternalAction(
         target=Label(f"//:{name}"),
         args=args,
         outs=out_labels,
@@ -275,15 +312,45 @@ class Digraph:
         return reverse
 
 
+class CAS(Protocol):
+    def find_missing_blobs(self, keys: list[str]) -> list[str]: ...
+    def upload_blobs(self, blobs: list[tuple[str, bytes]]): ...
+
+
+class LocalCAS(CAS):
+    def __init__(self, cachedir: pathlib.Path) -> None:
+        self.cachedir = cachedir / "cas"
+        self.cachedir.mkdir(parents=True, exist_ok=True)
+
+    def find_missing_blobs(self, keys: list[str]) -> list[str]:
+        missing = []
+        for key in keys:
+            p = self.cachedir / key
+            if p.exists():
+                continue
+            missing.append(key)
+        return missing
+
+    def upload_blobs(self, blobs: list[tuple[str, bytes]]):
+        for key, blob in blobs:
+            p = self.cachedir / key
+            if p.exists():
+                continue
+            p.write_bytes(blob)
+
+    def link_entry_to(self, key: str, dest: pathlib.Path) -> None:
+        dest.hardlink_to(self.cachedir / key)
+
+
 class ActionCache(Protocol):
     def get_action_result(self, key: str) -> ActionResult | None: ...
     def update_action_result(self, key: str, result: ActionResult): ...
 
 
-class FileSystemActionCache:
+class LocalActionCache:
     def __init__(self, cachedir: pathlib.Path) -> None:
-        self.cachedir = cachedir
-        cachedir.mkdir(parents=True, exist_ok=True)
+        self.cachedir = cachedir / "ac"
+        self.cachedir.mkdir(parents=True, exist_ok=True)
 
     def get_action_result(self, key: str) -> ActionResult | None:
         p = self.cachedir / key
@@ -295,38 +362,28 @@ class FileSystemActionCache:
         (self.cachedir / key).write_bytes(result.serialize())
 
 
-class Spawner(Protocol):
-    def spawn_action(self, action: Action) -> ActionResult: ...
+class ActionExecutor(Protocol):
+    def execute(self, action: Action) -> ActionResult: ...
 
 
-class SandboxedActionSpawner(Spawner):
+class SandboxedActionExecutor(ActionExecutor):
     _already_linked_paths: set[str]
     _next_sandbox_id: int
-    _targets: dict[Label, Target]
+    _local_cas: LocalCAS
     _execroot: pathlib.Path
 
-    def __init__(self, targets: dict[Label, Target], execroot: pathlib.Path) -> None:
+    def __init__(self, local_cas: LocalCAS, execroot: pathlib.Path) -> None:
         self._already_linked_paths = set()
         self._next_sandbox_id = 0
-        self._targets = targets
+        self._local_cas = local_cas
         self._execroot = execroot
 
-    def spawn_action(self, action: Action) -> ActionResult:
+    def execute(self, action: Action) -> ActionResult:
         sandbox_dir = self._get_next_sandbox_dir()
 
-        for src in action.srcs:
-            target = self._targets[src]
-            match target:
-                case RuleTarget():
-                    # a dependency on a rule target means you implicitly depend on all of its outputs
-                    for out in target.outs:
-                        (sandbox_dir / out.path()).hardlink_to(
-                            self._execroot / out.path()
-                        )
-                case WorkspaceFileTarget():
-                    (sandbox_dir / src.path()).hardlink_to(self._execroot / src.path())
-                case OutputFileTarget():
-                    (sandbox_dir / src.path()).hardlink_to(self._execroot / src.path())
+        for input in action.ins:
+            # TODO: handle remote CAS
+            self._local_cas.link_entry_to(input.digest, sandbox_dir / input.filename)
 
         result = subprocess.run(
             action.args,
@@ -338,10 +395,11 @@ class SandboxedActionSpawner(Spawner):
         outputs: dict[str, str] = dict()
         if result.returncode == 0:
             for out in action.outs:
-                sandbox_out = sandbox_dir / out.path()
+                sandbox_out = sandbox_dir / out
                 assert sandbox_out.exists(), "action did not produce expected output"
-                outputs[out.path()] = sandbox_out.read_text("utf-8")
-                sandbox_out.rename(self._execroot / out.path())
+                outputs[out] = sandbox_out.read_text("utf-8")
+                sandbox_out.rename(self._execroot / out)
+                # TODO: move to CAS
 
         shutil.rmtree(sandbox_dir)
 
@@ -370,7 +428,8 @@ class ActionRunner:
     _execroot: pathlib.Path
     _targets: dict[Label, Target]
     _cache: ActionCache
-    _spawner: Spawner
+    _executor: ActionExecutor
+    _cas: CAS
     cache_hit_stats: CacheHitStats
 
     def __init__(
@@ -378,19 +437,20 @@ class ActionRunner:
         execroot: pathlib.Path,
         targets: dict[Label, Target],
         cache: ActionCache,
-        spawner: Spawner,
+        executor: ActionExecutor,
+        cas: CAS,
     ) -> None:
         self._execroot = execroot
         self._targets = targets
         self._cache = cache
         self._already_linked_paths = set()
-        self._next_sandbox_id = 0
         self.cache_hit_stats = CacheHitStats()
-        self._spawner = spawner
+        self._executor = executor
+        self._cas = cas
 
-    def run(self, action: Action) -> ActionResult:
+    def run(self, internal_action: InternalAction) -> ActionResult:
         # link all referenced workspace files into the execroot
-        for src in action.srcs:
+        for src in internal_action.srcs:
             target = self._targets[src]
             if not isinstance(target, WorkspaceFileTarget):
                 continue
@@ -403,12 +463,22 @@ class ActionRunner:
             dest.hardlink_to(workspace / src_path)
             self._already_linked_paths.add(src_path)
 
-        action_key = self._hash_action(action, self._execroot)
+        action = self._internal_action_to_action(internal_action)
+        action_key = action.hash()
+        digest_to_filename = { input.digest: input.filename for input in action.ins }
+
+        missing = self._cas.find_missing_blobs([input.digest for input in action.ins])
+        if len(missing) > 0:
+            blobs: list[tuple[str, bytes]] = []
+            for key in missing:
+                contents = (self._execroot / digest_to_filename[key]).read_bytes()
+                blobs.append((key, contents))
+            self._cas.upload_blobs(blobs)
 
         result = self._cache.get_action_result(action_key)
         if result is None:
             self.cache_hit_stats.misses += 1
-            result = self._spawner.spawn_action(action=action)
+            result = self._executor.execute(action=self._internal_action_to_action(internal_action))
             if result.exit_code == 0:
                 self._cache.update_action_result(action_key, result)
         else:
@@ -418,16 +488,21 @@ class ActionRunner:
 
         return result
 
-    def _hash_action(self, action: Action, execroot: pathlib.Path) -> str:
-        hasher = hashlib.sha256()
-        hasher.update(" ".join(action.args).encode())
-        hasher.update(" ".join(out.path() for out in action.outs).encode())
+    def _internal_action_to_action(self, internal_action: InternalAction) -> Action:
+        ins: list[ActionInput] = []
 
-        for src in action.srcs:
-            content = execroot.joinpath(src.path()).read_bytes()
+        for src in internal_action.srcs:
+            src_path = src.path()
+            content = self._execroot.joinpath(src_path).read_bytes()
+            hasher = hashlib.sha256()
             hasher.update(content)
+            ins.append(ActionInput(filename=src_path, digest=hasher.hexdigest()))
 
-        return hasher.hexdigest()
+        return Action(
+            args=internal_action.args,
+            outs=[out.path() for out in internal_action.outs],
+            ins=ins,
+        )
 
 
 if __name__ == "__main__":
