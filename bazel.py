@@ -3,7 +3,6 @@ import argparse
 import collections
 import dataclasses
 import hashlib
-import json
 import os
 import pathlib
 import pickle
@@ -153,7 +152,7 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     runner = ActionRunner(
         execroot=execroot,
         targets=targets,
-        cache=FileSystemCache(cachedir=execroot / ".cache"),
+        cache=FileSystemActionCache(cachedir=execroot / ".cache"),
         spawner=SandboxedActionSpawner(execroot=execroot, targets=targets),
     )
 
@@ -276,12 +275,12 @@ class Digraph:
         return reverse
 
 
-class Cache(Protocol):
+class ActionCache(Protocol):
     def get_action_result(self, key: str) -> ActionResult | None: ...
     def update_action_result(self, key: str, result: ActionResult): ...
 
 
-class FileSystemCache:
+class FileSystemActionCache:
     def __init__(self, cachedir: pathlib.Path) -> None:
         self.cachedir = cachedir
         cachedir.mkdir(parents=True, exist_ok=True)
@@ -370,7 +369,7 @@ class CacheHitStats:
 class ActionRunner:
     _execroot: pathlib.Path
     _targets: dict[Label, Target]
-    _cache: Cache
+    _cache: ActionCache
     _spawner: Spawner
     cache_hit_stats: CacheHitStats
 
@@ -378,7 +377,7 @@ class ActionRunner:
         self,
         execroot: pathlib.Path,
         targets: dict[Label, Target],
-        cache: Cache,
+        cache: ActionCache,
         spawner: Spawner,
     ) -> None:
         self._execroot = execroot
