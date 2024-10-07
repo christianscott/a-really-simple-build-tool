@@ -4,3 +4,4 @@ bazel-*
 out/
 notbzl
 .cache
+__pycache__/
