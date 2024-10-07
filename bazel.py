@@ -34,8 +34,12 @@ class Label:
         return isinstance(value, Label) and self.label == value.label
 
     def path(self) -> str:
-        assert self.label.startswith("//:")
-        return self.label.replace("//:", "")
+        assert Label.is_absolute(self.label)
+        return self.label.replace("//", "").replace(":", "/").removeprefix("/")
+
+    @staticmethod
+    def is_absolute(label: str):
+        return label.startswith("//")
 
 
 class Serde(abc.ABC):
@@ -113,21 +117,41 @@ def clean(workspace: pathlib.Path):
 
 
 def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
-    with open("./examples/txt/BUILD.bazel", "r") as file:
-        contents = file.read()
+    output_dir = workspace / "bazel-out"
+    execroot = output_dir / "execroot"
+    execroot.mkdir(parents=True, exist_ok=True)
 
     actions: list[InternalAction] = []
-    exec(contents, {}, {
-        "genrule": lambda *_args, **kwargs: actions.append(genrule(**kwargs))
-    })
+    for build_file in workspace.rglob("**/BUILD.bazel"):
+        if str(build_file).startswith(str(output_dir)):
+            continue
+        with open(build_file, "r") as file:
+            contents = file.read()
+
+        package_path = build_file.parent.relative_to(workspace)
+        package = str(package_path)
+        if package == ".":
+            package = ""
+
+        exec(contents, {}, {
+            "genrule": lambda *_args, **kwargs: actions.append(genrule(package=package, **kwargs))
+        })
+
     label_to_action: dict[Label, InternalAction] = {action.target: action for action in actions}
 
     targets: dict[Label, Target] = dict()
-
     for root, _, files in os.walk(workspace):
+        if root.startswith(str(output_dir)):
+            continue
+
+        assert pathlib.Path(root).joinpath("BUILD.bazel").exists(), "each directory must be a package"
+
         rel_root = os.path.relpath(root, workspace)
+
         for file in files:
-            file_target_label = f"//:{os.path.join(rel_root, file).replace('./', '')}"
+            if file == "BUILD.bazel":
+                continue
+            file_target_label = f"//{rel_root.removeprefix('./')}:{file}"
             targets[Label(file_target_label)] = WorkspaceFileTarget()
 
     for action in actions:
@@ -152,9 +176,6 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
             case WorkspaceFileTarget():
                 # ignore these requests
                 pass
-
-    execroot = workspace / "bazel-out" / "execroot"
-    execroot.mkdir(parents=True, exist_ok=True)
 
     graph = Digraph()
     for action in actions:
@@ -233,6 +254,7 @@ def pluralize(word: str, count: int) -> str:
 
 def genrule(
     *,
+    package: str,
     name: str,
     cmd: str,
     srcs: list[str] | None = None,
@@ -243,22 +265,36 @@ def genrule(
     assert len(outs) > 0, "genrule must have at least one output files"
 
     srcs = srcs if srcs is not None else []
-    src_labels = [Label(f"//{src}") for src in srcs]
-    out_labels = [Label(f"//:{out}") for out in outs]
+    src_labels = [
+        Label(src) if Label.is_absolute(src) else Label(f"//{package}{src}")
+        for src in srcs
+    ]
+    out_labels = [Label(f"//{package}:{out}") for out in outs]
 
     cmd_lines = ["set -euo pipefail"]
     if len(outs) == 1:
-        cmd_lines.append(f"out() {{ echo {outs[0]}; }}")
+        only_out_path = out_labels[0].path()
+        cmd_lines.append(f"out() {{ echo {only_out_path}; }}")
+    if len(srcs) > 0:
+        cmd_lines.append("location() {")
+        cmd_lines.append("  case \"$1\" in")
+        for src in src_labels:
+            cmd_lines.append(f"  '{src.label}') echo '{src.path()}' ;;")
+        cmd_lines.append("  *)")
+        cmd_lines.append("    echo >&2 \"could not locate '$1'\"")
+        cmd_lines.append("    exit 1")
+        cmd_lines.append("    ;;")
+        cmd_lines.append("  esac")
+        cmd_lines.append("}")
     cmd_lines.append(cmd)
     args = ["bash", "-c", "\n".join(cmd_lines)]
 
     return InternalAction(
-        target=Label(f"//:{name}"),
+        target=Label(f"//{package}:{name}"),
         args=args,
         outs=out_labels,
         srcs=src_labels,
     )
-
 
 class Digraph:
     edges: collections.defaultdict[Label, set[Label]]
@@ -339,6 +375,7 @@ class LocalCAS(CAS):
             p.write_bytes(blob)
 
     def link_entry_to(self, key: str, dest: pathlib.Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
         dest.hardlink_to(self.cachedir / key)
 
 
@@ -383,10 +420,14 @@ class SandboxedActionExecutor(ActionExecutor):
 
         for input in action.ins:
             if isinstance(self._cas, LocalCAS):
-                self._cas.link_entry_to(input.digest, sandbox_dir / input.filename)
+                dest = sandbox_dir / input.filename
+                self._cas.link_entry_to(input.digest, dest)
             else:
                 # TODO: handle remote CAS
                 raise Exception("unimplemented")
+        
+        for out in action.outs:
+            sandbox_dir.joinpath(out).parent.mkdir(parents=True, exist_ok=True)
 
         result = subprocess.run(
             action.args,
@@ -399,9 +440,11 @@ class SandboxedActionExecutor(ActionExecutor):
         if result.returncode == 0:
             for out in action.outs:
                 sandbox_out = sandbox_dir / out
-                assert sandbox_out.exists(), "action did not produce expected output"
+                assert sandbox_out.exists(), f"action did not produce expected output: {sandbox_out}"
                 outputs[out] = sandbox_out.read_text("utf-8")
-                sandbox_out.rename(self._execroot / out)
+                target = self._execroot / out
+                target.parent.mkdir(parents=True, exist_ok=True)
+                sandbox_out.rename(target)
                 # TODO: move to CAS
 
         shutil.rmtree(sandbox_dir)
@@ -462,8 +505,10 @@ class ActionRunner:
             if src_path in self._already_linked_paths:
                 continue
             dest = self._execroot / src_path
+            src = workspace / src_path
             dest.unlink(missing_ok=True)
-            dest.hardlink_to(workspace / src_path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.hardlink_to(src)
             self._already_linked_paths.add(src_path)
 
         action = self._internal_action_to_action(internal_action)
@@ -484,6 +529,8 @@ class ActionRunner:
             result = self._executor.execute(action=self._internal_action_to_action(internal_action))
             if result.exit_code == 0:
                 self._cache.update_action_result(action_key, result)
+            else:
+                raise Exception(f"failed to execute {action_key}: {str(result.stderr)}")
         else:
             self.cache_hit_stats.hits += 1
             for file, contents in result.outputs.items():

@@ -1,0 +1,6 @@
+genrule(
+    name="combined",
+    cmd="sleep 1; cat $(location //foo:one.txt) $(location //foo:two.txt) > $(out)",
+    srcs=["//foo:one.txt", "//foo:two.txt"],
+    outs=["combined.txt"],
+)

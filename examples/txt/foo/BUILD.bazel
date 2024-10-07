@@ -1,0 +1,12 @@
+genrule(
+    name = "one",
+    srcs = [":who.txt"],
+    outs = ["one.txt"],
+    cmd = "cat $(location //foo:who.txt) > $(out)",
+)
+
+genrule(
+    name="two",
+    cmd="sleep 2; echo I am two > $(out)",
+    outs=["two.txt"],
+)

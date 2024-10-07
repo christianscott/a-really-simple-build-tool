@@ -173,3 +173,24 @@ output files are currently simpler to resolve because we can just iterate all ta
 let's ignore multiple pacakges for now and solve the simplest case.
 
 simplest option is to try to read the file when it's referenced.
+
+## what does `$(location :label)` return?
+
+relative path to the file, assuming :label "expands" to a single file. note that actions for packages located in subdirectories are not run inside a corresponding subdirectory inside the sandbox. instead, they're run in the sandbox "root" while files inside that package are linked into a nested directory.
+
+say you have these files:
+
+```
+- foo/
+  - input.txt
+  - BUILD.bazel
+```
+
+you'll get the following sandbox layout:
+
+```
+- sandbox/1
+  - foo/input.txt
+```
+
+and actions will be run inside `sandbox/1`.
