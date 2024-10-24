@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from local import LocalActionCache, LocalCAS, SandboxedActionExecutor
 from protocol import Action, ActionCache, ActionExecutor, ActionInput, ActionResult, CAS
+from remote import RemoteCAS
 
 
 class Label:
@@ -153,13 +154,14 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     sources = [label for label, count in indegrees.items() if count == 0]
 
     cachedir=execroot / ".cache"
-    local_cas = LocalCAS(cachedir=cachedir)
+    # cas = LocalCAS(cachedir=cachedir)
+    cas = RemoteCAS()
     runner = ActionRunner(
         execroot=execroot,
         targets=targets,
         cache=LocalActionCache(cachedir=cachedir),
-        executor=SandboxedActionExecutor(execroot=execroot, cas=local_cas),
-        cas=local_cas
+        executor=SandboxedActionExecutor(execroot=execroot, cas=cas),
+        cas=cas
     )
 
     ready: queue.Queue[Label] = queue.Queue()

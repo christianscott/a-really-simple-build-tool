@@ -45,13 +45,11 @@ class LocalActionCache:
 
 
 class SandboxedActionExecutor(ActionExecutor):
-    _already_linked_paths: set[str]
     _next_sandbox_id: int
     _cas: CAS
     _execroot: pathlib.Path
 
     def __init__(self, cas: CAS, execroot: pathlib.Path) -> None:
-        self._already_linked_paths = set()
         self._next_sandbox_id = 0
         self._cas = cas
         self._execroot = execroot
@@ -59,14 +57,17 @@ class SandboxedActionExecutor(ActionExecutor):
     def execute(self, action: Action) -> ActionResult:
         sandbox_dir = self._get_next_sandbox_dir()
 
-        for input in action.ins:
-            if isinstance(self._cas, LocalCAS):
+        if isinstance(self._cas, LocalCAS):
+            for input in action.ins:
                 dest = sandbox_dir / input.filename
                 self._cas.link_entry_to(input.digest, dest)
-            else:
-                # TODO: handle remote CAS
-                raise Exception("unimplemented")
-        
+        else:
+            blobs = self._cas.read_blobs([input.digest for input in action.ins])
+            for input, blob in zip(action.ins, blobs):
+                dest = sandbox_dir / input.filename
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(blob)
+
         for out in action.outs:
             sandbox_dir.joinpath(out).parent.mkdir(parents=True, exist_ok=True)
 
