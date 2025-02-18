@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from local import LocalActionCache, LocalCAS, SandboxedActionExecutor
 from protocol import Action, ActionCache, ActionExecutor, ActionInput, ActionResult, CAS
-from remote import RemoteCAS
+from remote import RemoteActionCache, RemoteCAS
 
 
 class Label:
@@ -73,7 +73,7 @@ def clean(workspace: pathlib.Path):
     shutil.rmtree(str(workspace / "bazel-out"), ignore_errors=True)
 
 
-def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
+def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int, remote: bool):
     output_dir = workspace / "bazel-out"
     execroot = output_dir / "execroot"
     execroot.mkdir(parents=True, exist_ok=True)
@@ -153,13 +153,17 @@ def build(workspace: pathlib.Path, requested_labels: list[str], jobs: int):
     indegrees = dependees.indegrees()
     sources = [label for label, count in indegrees.items() if count == 0]
 
-    cachedir=execroot / ".cache"
-    # cas = LocalCAS(cachedir=cachedir)
-    cas = RemoteCAS()
+    if remote is not None:
+        cas = RemoteCAS(base_url=remote)
+        cache = RemoteActionCache(base_url=remote)
+    else:
+        cachedir = execroot / ".cache"
+        cas = LocalCAS(cachedir=cachedir)
+        cache = LocalActionCache(cachedir=cachedir)
     runner = ActionRunner(
         execroot=execroot,
         targets=targets,
-        cache=LocalActionCache(cachedir=cachedir),
+        cache=cache,
         executor=SandboxedActionExecutor(execroot=execroot, cas=cas),
         cas=cas
     )
@@ -403,6 +407,7 @@ if __name__ == "__main__":
     parser.add_argument("labels", nargs="*", help="labels for the targets to build")
     parser.add_argument("--workspace", default=".", help="workspace directory")
     parser.add_argument("--jobs", default=8, help="workspace directory", type=int)
+    parser.add_argument("--remote", default=None, help="remote cache server address")
     args = parser.parse_args()
 
     if args.workspace.startswith("/"):
@@ -413,6 +418,6 @@ if __name__ == "__main__":
 
     match args.mode:
         case "build":
-            build(workspace, args.labels, args.jobs)
+            build(workspace, args.labels, args.jobs, args.remote)
         case "clean":
             clean(workspace)
